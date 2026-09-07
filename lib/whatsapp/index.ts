@@ -26,6 +26,22 @@ export type OrderDetails = {
    * this module used to take a threshold and fee and derive its own figure.
    */
   delivery: DeliveryQuote;
+  /**
+   * ZW-YYMM-NNNN, once the order has actually been recorded. Omitted when the
+   * capture failed, so the message stays sendable rather than advertising a
+   * reference the customer cannot be given.
+   */
+  orderNumber?: string;
+  /**
+   * The customer's private tracking URL, when there is one.
+   *
+   * This message travels FROM the customer TO ZWIK, so the token stays with its
+   * own owner — it lands in their sent history, which until the order-number +
+   * phone lookup exists is their only way back to the order. The residual risk
+   * is a customer forwarding their own message onward; that exposes one order
+   * of their own and nothing else.
+   */
+  trackingUrl?: string;
 };
 
 /** Builds the itemized order message sent over WhatsApp. No payment is collected on the site. */
@@ -34,11 +50,13 @@ export function buildOrderMessage({
   giftWrap,
   customer,
   delivery,
+  orderNumber,
+  trackingUrl,
 }: OrderDetails): string {
   const subtotal = lines.reduce((sum, line) => sum + line.price * line.qty, 0);
 
   return [
-    "New ZWIK order",
+    orderNumber ? `New ZWIK order · ${orderNumber}` : "New ZWIK order",
     "",
     ...lines.map(
       (line, i) =>
@@ -59,5 +77,6 @@ export function buildOrderMessage({
     `Note: ${customer.note || "—"}`,
     "",
     "Please confirm availability and share payment details.",
+    ...(trackingUrl ? ["", `Track: ${trackingUrl}`] : []),
   ].join("\n");
 }

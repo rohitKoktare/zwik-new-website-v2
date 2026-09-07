@@ -22,7 +22,7 @@ import {
   listOrdersForAdmin,
   parseOrderStatusFilter,
 } from "@/lib/supabase/queries/admin-orders";
-import { formatInr } from "@/lib/format";
+import { formatInr, ordinalSuffix } from "@/lib/format";
 import { ORDER_STATUSES, ORDER_STATUS_LABELS } from "@/types/order";
 import type { OrderStatus } from "@/types/order";
 
@@ -107,13 +107,12 @@ export default async function AdminOrdersPage({
 
       <form method="get" action={ORDERS_PATH} className="mt-4 flex flex-wrap items-end gap-3">
         <div className="grid gap-1.5">
-          <Label htmlFor="q">Customer phone</Label>
+          <Label htmlFor="q">Phone or order number</Label>
           <Input
             id="q"
             name="q"
-            inputMode="numeric"
             defaultValue={search ?? ""}
-            placeholder="917666068317"
+            placeholder="9876543210 or ZW-2609-0042"
             className="font-mono sm:w-52"
           />
         </div>
@@ -170,6 +169,7 @@ export default async function AdminOrdersPage({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Order</TableHead>
                   <TableHead>When</TableHead>
                   <TableHead>Customer</TableHead>
                   <TableHead>Items</TableHead>
@@ -181,6 +181,10 @@ export default async function AdminOrdersPage({
               <TableBody>
                 {orders.map((order) => (
                   <TableRow key={order.id}>
+                    <TableCell className="font-mono text-xs font-medium">
+                      {order.orderNumber}
+                    </TableCell>
+
                     <TableCell className="text-muted-foreground">
                       {formatDateTime(order.createdAt)}
                     </TableCell>
@@ -194,6 +198,17 @@ export default async function AdminOrdersPage({
                           <span className="font-mono text-xs text-muted-foreground">
                             {order.customerPhone}
                           </span>
+                          {/* Counts only orders already confirmed or fulfilled,
+                              excluding this one — an unconfirmed order may
+                              never have been real. */}
+                          {order.repeatCustomer && (
+                            <span className="mt-0.5">
+                              <Badge variant="outline">
+                                Repeat · {order.priorConfirmedOrders + 1}
+                                {ordinalSuffix(order.priorConfirmedOrders + 1)} order
+                              </Badge>
+                            </span>
+                          )}
                         </span>
                       ) : (
                         <span className="text-muted-foreground">

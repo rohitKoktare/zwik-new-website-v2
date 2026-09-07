@@ -40,11 +40,22 @@ import { logger } from "@/lib/logger";
 const DEDUPE_WINDOW_MS = 30 * 60 * 1000;
 
 export type CaptureResult =
-  | { ok: true; orderId: string; customerRecorded: boolean }
+  | {
+      ok: true;
+      orderId: string;
+      /** ZW-YYMM-NNNN. Shown to the customer and put in the WhatsApp message. */
+      orderNumber: string;
+      /** Capability token for the tracking URL. Treat as a secret. */
+      publicToken: string;
+      customerRecorded: boolean;
+    }
   /**
-   * `reason` is for logs and tests, not for display. The cart shows nothing on
-   * failure — the customer is already on their way to WhatsApp and a warning
-   * about our database would only confuse them.
+   * `reason` is for logs, not for display.
+   *
+   * The cart no longer ignores this: it opens the confirmation dialog either
+   * way, just without an order number, still offering the WhatsApp link and a
+   * copy-the-summary fallback. A database problem must not cost the sale
+   * (ARCHITECTURE.md §5.1).
    */
   | { ok: false; reason: string };
 
@@ -171,11 +182,21 @@ export async function captureOrderAction(input: OrderCaptureInput): Promise<Capt
   };
 
   let orderId: string;
+  let orderNumber: string;
+  let publicToken: string;
 
   if (existingId) {
-    const { error } = await supabase.from("orders").update(orderRow).eq("id", existingId);
-    if (error) {
-      logger.error("captureOrderAction order update failed", { error: error.message });
+    const { data: updated, error } = await supabase
+      .from("orders")
+      .update(orderRow)
+      .eq("id", existingId)
+      // Reusing a row keeps its original number, so the customer who taps twice
+      // is shown the same one rather than appearing to have two orders.
+      .select("id, order_number, public_token")
+      .single();
+
+    if (error || !updated) {
+      logger.error("captureOrderAction order update failed", { error: error?.message });
       return { ok: false, reason: "order_write_failed" };
     }
     // Replace the lines wholesale; the cart may have changed between taps.
@@ -189,19 +210,28 @@ export async function captureOrderAction(input: OrderCaptureInput): Promise<Capt
       });
       return { ok: false, reason: "order_items_write_failed" };
     }
-    orderId = existingId;
+    const row = updated as { id: string; order_number: string; public_token: string };
+    orderId = row.id;
+    orderNumber = row.order_number;
+    publicToken = row.public_token;
   } else {
     const { data: created, error } = await supabase
       .from("orders")
       .insert(orderRow)
-      .select("id")
+      // order_number is filled by the orders_set_order_number trigger, so it
+      // has to be read back rather than generated here (migration 0014).
+      .select("id, order_number, public_token")
       .single();
 
     if (error || !created) {
       logger.error("captureOrderAction order insert failed", { error: error?.message });
       return { ok: false, reason: "order_write_failed" };
     }
-    orderId = (created as { id: string }).id;
+
+    const row = created as { id: string; order_number: string; public_token: string };
+    orderId = row.id;
+    orderNumber = row.order_number;
+    publicToken = row.public_token;
   }
 
   const { error: itemsError } = await supabase
@@ -219,14 +249,23 @@ export async function captureOrderAction(input: OrderCaptureInput): Promise<Capt
     return { ok: false, reason: "order_items_write_failed" };
   }
 
+  // orderNumber is safe to log; publicToken deliberately is not — logs are
+  // long-lived and the token grants read access to the order on its own.
   logger.info("Order captured", {
     orderId,
+    orderNumber,
     lines: items.length,
     subtotal,
     customerRecorded: customerId !== null,
   });
 
-  return { ok: true, orderId, customerRecorded: customerId !== null };
+  return {
+    ok: true,
+    orderId,
+    orderNumber,
+    publicToken,
+    customerRecorded: customerId !== null,
+  };
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>;

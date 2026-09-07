@@ -141,7 +141,7 @@ Deliberate properties of this flow:
   a hard-coded constant.
 - Message text must be URL-encoded exactly once, at link-build time.
 
-### 5.1 Order capture (migration 0012)
+### 5.1 Order capture (migrations 0012, 0014)
 
 An earlier revision of this document guaranteed that "the cart never reaches the
 server, so no customer PII is stored by the site", and said that persisting
@@ -149,15 +149,27 @@ orders would be "a deliberate scope change — not an incremental tweak". That
 scope change has now been made, so ZWIK can keep order records and run WhatsApp
 campaigns. The guarantee above no longer holds and this section replaces it.
 
-At hand-off the cart is also POSTed to `captureOrderAction`
+Pressing **Place order** in the cart calls `captureOrderAction`
 (`lib/store/orders/capture.ts`), which writes `customers`, `orders` and
-`order_items`. Five properties are load-bearing:
+`order_items` and returns the order number and tracking token. The on-site press
+is what places the order; WhatsApp is a follow-up offered in the confirmation
+dialog, not the act that constitutes the order. Six properties are load-bearing:
 
-1. **Capture never blocks the order.** The action is fired from the WhatsApp
-   link's `onClick` without `preventDefault` and is not awaited. Awaiting it
-   would sever the new tab from the user gesture and the popup blocker would eat
-   it. Every failure path returns rather than throws, and the customer reaches
-   WhatsApp regardless. Losing a CRM row is preferable to losing a sale.
+1. **A database failure must not cost the sale.** The action *is* now awaited —
+   an earlier revision of this section promised it never would be, because the
+   CTA was an anchor straight to `wa.me` and a tab opened after an awaited call
+   loses the user gesture and gets eaten by the popup blocker. Moving WhatsApp
+   behind a second click *inside* the dialog removed that constraint, and
+   awaiting is unavoidable if the dialog is to show an order number.
+
+   The replacement guarantee is weaker but explicit: every failure path returns
+   rather than throws, and on failure the dialog still opens with the WhatsApp
+   link, the copy-the-summary fallback, and the cart **left intact** so the
+   order can be retried. It simply carries no order number, and none is
+   invented — a fabricated reference would send the customer to WhatsApp quoting
+   something ZWIK cannot look up. Verified by
+   `EXPECT_DB_FAILURE=1 npm run check:checkout` against a dev server started
+   with a deliberately broken service-role key.
 
 2. **No money is trusted from the client.** The POST carries product ids and
    quantities only. Prices, the delivery charge and the totals are re-derived
@@ -170,15 +182,43 @@ At hand-off the cart is also POSTed to `captureOrderAction`
    the anon key forging or enumerating orders. The server action is the trust
    boundary that replaces those policies.
 
-4. **An order is not a confirmed order.** A `wa.me` link only opens WhatsApp
-   with a prefilled message; whether the customer presses send is unobservable
-   from the site. Rows are therefore created as `initiated`, labelled "Started
-   on site" in the admin, and only a human may move one to `confirmed`.
+4. **An order is not a *confirmed* order.** `initiated` no longer means "we
+   can't tell whether they sent it" — the customer did press Place order, so the
+   row is not speculative. It now means "placed on site, not yet agreed with the
+   customer", which is why the admin label is **"Placed, unconfirmed"** rather
+   than the old "Started on site". What stays unobservable is whether ZWIK can
+   actually fulfil it: availability, the final delivery charge and payment are
+   all settled by a human on WhatsApp, and only a human may move a row to
+   `confirmed`. Nothing customer-facing may imply the order is paid or reserved
+   (§18), which is why the tracking page says so in as many words.
 
 5. **Contact details live in exactly one place.** `orders` deliberately does not
    copy the name or phone; both live on `customers`. Deleting a customer erases
    the personal data while `orders.customer_id` goes null, so the sales record
-   survives anonymously. That is the erasure path (§16.1).
+   survives anonymously. That is the erasure path (§16.1). A side effect worth
+   knowing: an erased customer also loses tracking access, because the lookup
+   has nothing left to match. That is correct, and the page must answer "not
+   found" rather than hint that a record once existed.
+
+6. **The tracking URL is a capability, not an identifier.**
+   `orders.public_token` is a separate `uuid`, not the primary key: §18 forbids
+   putting internal ids in a message, and a distinct token can be rotated if a
+   link leaks. Its page (`app/(store)/orders/[token]/page.tsx`) is `noindex` and
+   `force-dynamic` — the `(store)` layout's `revalidate = 3600` would otherwise
+   put a URL that *is* a credential into the ISR cache, and serve a stale status
+   with it. It reads through a service-role query
+   (`lib/store/orders/lookup.ts`) that returns a deliberately narrowed view:
+   no name, phone, city, internal id or admin note. Status labels come from a
+   customer-facing map, kept separate from the admin one because the admin hints
+   are written in admin voice ("You have spoken to the customer") and must not
+   leak. The token is never logged.
+
+Order numbers (`ZW-YYMM-NNNN`) come from `next_order_number()`, a
+`security definer` function doing `insert ... on conflict do update ... returning`
+against `order_number_counters` — atomic, so concurrent checkouts cannot collide
+(proved with 50 concurrent inserts). The period is `YYMM` in `Asia/Kolkata`, so
+months break on IST rather than UTC. Gaps are expected and harmless: a number is
+consumed even if the order is later deleted. It is an identifier, not a ledger.
 
 ### 5.2 Outbound messaging
 

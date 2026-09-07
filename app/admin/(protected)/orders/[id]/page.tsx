@@ -19,7 +19,7 @@ import { setOrderStatusAction } from "@/lib/admin/orders/actions";
 import { getSiteSettings } from "@/lib/supabase/queries/settings";
 import { buildWaLink } from "@/lib/whatsapp";
 import { uuidSchema } from "@/lib/validation/common";
-import { formatInr } from "@/lib/format";
+import { formatInr, ordinalSuffix } from "@/lib/format";
 import { ORDER_STATUS_HINTS, ORDER_STATUS_LABELS } from "@/types/order";
 
 export const metadata: Metadata = { title: "Order" };
@@ -79,7 +79,7 @@ export default async function AdminOrderPage({
   return (
     <>
       <PageHeader
-        title={`Order · ${formatDateTime(order.createdAt)}`}
+        title={`${order.orderNumber} · ${formatDateTime(order.createdAt)}`}
         description={ORDER_STATUS_HINTS[order.status]}
         action={
           // Base UI composes via `render`, not Radix's `asChild`.
@@ -94,6 +94,13 @@ export default async function AdminOrderPage({
           {ORDER_STATUS_LABELS[order.status]}
         </Badge>
         {order.giftWrap && <Badge variant="secondary">Gift wrap</Badge>}
+        {/* Confirmed/fulfilled orders only, excluding this one. */}
+        {order.repeatCustomer && (
+          <Badge variant="outline">
+            Repeat customer · {order.priorConfirmedOrders + 1}
+            {ordinalSuffix(order.priorConfirmedOrders + 1)} order
+          </Badge>
+        )}
         {order.confirmedAt && (
           <span className="text-xs text-muted-foreground">
             Confirmed {formatDateTime(order.confirmedAt)}

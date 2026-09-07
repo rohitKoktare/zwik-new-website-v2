@@ -9,6 +9,7 @@ type CartAction =
   | { type: "add"; line: Omit<CartLine, "qty">; qty: number }
   | { type: "setQty"; productId: string; qty: number }
   | { type: "remove"; productId: string }
+  | { type: "clear" }
   | { type: "hydrate"; lines: CartLine[] };
 
 function reducer(lines: CartLine[], action: CartAction): CartLine[] {
@@ -28,6 +29,8 @@ function reducer(lines: CartLine[], action: CartAction): CartLine[] {
     }
     case "remove":
       return lines.filter((l) => l.productId !== action.productId);
+    case "clear":
+      return [];
     default:
       return lines;
   }
@@ -41,6 +44,12 @@ type CartContextValue = {
   addToCart: (line: Omit<CartLine, "qty">, qty?: number) => void;
   setQty: (productId: string, qty: number) => void;
   removeLine: (productId: string) => void;
+  /**
+   * Empties the cart. Called once an order is actually placed — until this
+   * existed the cart survived ordering, so a customer who came back to the tab
+   * still saw everything they had just bought sitting in it.
+   */
+  clearCart: () => void;
   count: number;
   subtotal: number;
 };
@@ -83,6 +92,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       },
       setQty: (productId, qty) => dispatch({ type: "setQty", productId, qty }),
       removeLine: (productId) => dispatch({ type: "remove", productId }),
+      clearCart: () => dispatch({ type: "clear" }),
       count,
       subtotal,
     };

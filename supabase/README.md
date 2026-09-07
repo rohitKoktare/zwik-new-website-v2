@@ -109,6 +109,7 @@ Then `npm run dev` and sign in at <http://localhost:3000/admin/login>.
 | `0011_delivery_settings.sql` | Delivery terms on `site_settings`: free-delivery threshold, scope note, flat fee |
 | `0012_customers_and_orders.sql` | `customers`, `orders`, `order_items` — personal data, admin-only RLS |
 | `0013_message_campaigns.sql` | `message_campaigns`, `campaign_recipients` — consent-gated campaign worklist |
+| `0014_order_numbers_and_tracking.sql` | `orders.order_number` + `orders.public_token`, `order_number_counters` and the atomic `next_order_number()` |
 
 Every table has RLS enabled with public-read / admin-write policies. There is no
 `authenticated users can do everything` policy anywhere — writes require an
