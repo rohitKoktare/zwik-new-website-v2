@@ -48,6 +48,13 @@ export function CategoryForm({ category }: { category?: AdminCategory }) {
   // hand. Rewriting an existing slug from the name would silently break links.
   const [slugTouched, setSlugTouched] = useState(isEditing);
   const [isActive, setIsActive] = useState(category?.isActive ?? true);
+  // Controlled like the fields above: updateCategoryAction revalidates this
+  // exact edit page, so a successful save hands this mounted form a fresh
+  // `category` prop. A `defaultValue` here would then change after Base UI's
+  // Input has already locked in its initial uncontrolled state, which trips
+  // its "changing the default value state" dev warning.
+  const [description, setDescription] = useState(category?.description ?? "");
+  const [sortOrder, setSortOrder] = useState(String(category?.sortOrder ?? 0));
 
   const effectiveSlug = slugTouched ? slug : slugify(name);
   const accent = CATEGORY_ACCENTS[effectiveSlug];
@@ -168,7 +175,8 @@ export function CategoryForm({ category }: { category?: AdminCategory }) {
             name="description"
             rows={3}
             maxLength={CATEGORY_DESCRIPTION_MAX_LENGTH}
-            defaultValue={category?.description ?? ""}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.description)}
           />
         </FormField>
@@ -211,7 +219,8 @@ export function CategoryForm({ category }: { category?: AdminCategory }) {
             step="1"
             min="0"
             className="w-32"
-            defaultValue={String(category?.sortOrder ?? 0)}
+            value={sortOrder}
+            onChange={(event) => setSortOrder(event.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.sortOrder)}
           />
         </FormField>

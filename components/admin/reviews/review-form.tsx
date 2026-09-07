@@ -60,6 +60,18 @@ export function ReviewForm({
 
   const [isActive, setIsActive] = useState(review?.isActive ?? true);
   const [isFeatured, setIsFeatured] = useState(review?.isFeatured ?? false);
+  // Controlled: updateReviewAction revalidates this exact edit page, so a
+  // successful save hands this mounted form a fresh `review` prop. A
+  // `defaultValue` here would then change after Base UI's Input has already
+  // locked in its initial uncontrolled state, which trips its "changing the
+  // default value state" dev warning. (The Textarea and native <select>
+  // fields below aren't Base UI components, so they aren't affected and stay
+  // as `defaultValue`.)
+  const [customerDisplayName, setCustomerDisplayName] = useState(
+    review?.customerDisplayName ?? "",
+  );
+  const [rating, setRating] = useState(review ? String(review.rating) : "");
+  const [sortOrder, setSortOrder] = useState(String(review?.sortOrder ?? 0));
 
   // The product a review already points at may have been hidden since. Keep it
   // in the list so editing an unrelated field cannot silently reassign it.
@@ -154,7 +166,8 @@ export function ReviewForm({
             id="customerDisplayName"
             name="customerDisplayName"
             maxLength={REVIEW_NAME_MAX_LENGTH}
-            defaultValue={review?.customerDisplayName ?? ""}
+            value={customerDisplayName}
+            onChange={(event) => setCustomerDisplayName(event.target.value)}
             required
             aria-invalid={Boolean(state.fieldErrors?.customerDisplayName)}
           />
@@ -176,7 +189,8 @@ export function ReviewForm({
             min="0"
             max="5"
             className="w-32"
-            defaultValue={review ? String(review.rating) : ""}
+            value={rating}
+            onChange={(event) => setRating(event.target.value)}
             required
             aria-invalid={Boolean(state.fieldErrors?.rating)}
           />
@@ -295,7 +309,8 @@ export function ReviewForm({
             step="1"
             min="0"
             className="w-32"
-            defaultValue={String(review?.sortOrder ?? 0)}
+            value={sortOrder}
+            onChange={(event) => setSortOrder(event.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.sortOrder)}
           />
         </FormField>

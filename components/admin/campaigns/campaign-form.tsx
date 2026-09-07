@@ -43,6 +43,12 @@ export function CampaignForm({
   );
 
   const [body, setBody] = useState(campaign?.body ?? "");
+  // Controlled like `body`: updateCampaignAction revalidates this exact edit
+  // page, so a successful save hands this mounted form a fresh `campaign`
+  // prop. A `defaultValue` here would then change after Base UI's Input has
+  // already locked in its initial uncontrolled state, which trips its
+  // "changing the default value state" dev warning.
+  const [name, setName] = useState(campaign?.name ?? "");
 
   /**
    * Two budgets, because characters are not what the link is limited by.
@@ -103,7 +109,8 @@ export function CampaignForm({
           id="name"
           name="name"
           maxLength={CAMPAIGN_NAME_MAX_LENGTH}
-          defaultValue={campaign?.name ?? ""}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
           required
           aria-invalid={Boolean(state.fieldErrors?.name)}
         />

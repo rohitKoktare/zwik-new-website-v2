@@ -12,9 +12,63 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import type { AdminSiteSettings } from "@/lib/supabase/queries/admin-settings";
 
+/**
+ * Every text field is controlled, matching ProductForm and CategoryForm.
+ *
+ * This form previously used `defaultValue`. That is fine right up until a
+ * successful save: `updateSettingsAction` calls `revalidateSiteWide()`, which
+ * refetches this page's server data and hands this same mounted component a
+ * new `settings` prop with the value just written. Base UI's `Input` (a
+ * `Field.Control` underneath) locks in its uncontrolled state from the first
+ * render, so a `defaultValue` that changes afterwards trips its own dev-mode
+ * guard — "changing the default value state of an uncontrolled FieldControl
+ * after being initialized." Holding the values in state avoids the problem
+ * entirely rather than suppressing the warning.
+ *
+ * All state changes happen in event handlers. Nothing here sets state from an
+ * effect (see components/admin/confirm-action.tsx for the same rule applied to
+ * action results).
+ */
+
+type FormValues = {
+  brandName: string;
+  contactEmail: string;
+  instagramUrl: string;
+  whatsappNumber: string;
+  whatsappDefaultMessage: string;
+  freeDeliveryThreshold: string;
+  deliveryFee: string;
+  deliveryScopeNote: string;
+  defaultSeoTitle: string;
+  defaultSeoDescription: string;
+};
+
+function initialValues(settings: AdminSiteSettings): FormValues {
+  return {
+    brandName: settings.brandName,
+    contactEmail: settings.contactEmail ?? "",
+    instagramUrl: settings.instagramUrl ?? "",
+    whatsappNumber: settings.whatsappNumber ?? "",
+    whatsappDefaultMessage: settings.whatsappDefaultMessage ?? "",
+    freeDeliveryThreshold:
+      settings.freeDeliveryThreshold === null ? "" : String(settings.freeDeliveryThreshold),
+    deliveryFee: settings.deliveryFee === null ? "" : String(settings.deliveryFee),
+    deliveryScopeNote: settings.deliveryScopeNote ?? "",
+    defaultSeoTitle: settings.defaultSeoTitle ?? "",
+    defaultSeoDescription: settings.defaultSeoDescription ?? "",
+  };
+}
+
 export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
   const [state, formAction] = useActionState(updateSettingsAction, IDLE_RESULT);
   const [whatsappEnabled, setWhatsappEnabled] = useState(settings.whatsappEnabled);
+  // Lazy initializer: runs once at mount, never re-synced from a later
+  // `settings` prop, so a post-save refetch cannot fight what's on screen.
+  const [values, setValues] = useState<FormValues>(() => initialValues(settings));
+
+  function setField<K extends keyof FormValues>(key: K, value: FormValues[K]) {
+    setValues((current) => ({ ...current, [key]: value }));
+  }
 
   return (
     <form action={formAction} className="mt-6 grid max-w-2xl gap-6">
@@ -33,7 +87,8 @@ export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
           <Input
             id="brandName"
             name="brandName"
-            defaultValue={settings.brandName}
+            value={values.brandName}
+            onChange={(e) => setField("brandName", e.target.value)}
             required
             aria-invalid={Boolean(state.fieldErrors?.brandName)}
           />
@@ -49,7 +104,8 @@ export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
             id="contactEmail"
             name="contactEmail"
             type="email"
-            defaultValue={settings.contactEmail ?? ""}
+            value={values.contactEmail}
+            onChange={(e) => setField("contactEmail", e.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.contactEmail)}
           />
         </FormField>
@@ -64,7 +120,8 @@ export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
             name="instagramUrl"
             inputMode="url"
             placeholder="https://instagram.com/…"
-            defaultValue={settings.instagramUrl ?? ""}
+            value={values.instagramUrl}
+            onChange={(e) => setField("instagramUrl", e.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.instagramUrl)}
           />
         </FormField>
@@ -106,7 +163,8 @@ export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
             id="whatsappNumber"
             name="whatsappNumber"
             inputMode="numeric"
-            defaultValue={settings.whatsappNumber ?? ""}
+            value={values.whatsappNumber}
+            onChange={(e) => setField("whatsappNumber", e.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.whatsappNumber)}
           />
         </FormField>
@@ -121,7 +179,8 @@ export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
             id="whatsappDefaultMessage"
             name="whatsappDefaultMessage"
             rows={3}
-            defaultValue={settings.whatsappDefaultMessage ?? ""}
+            value={values.whatsappDefaultMessage}
+            onChange={(e) => setField("whatsappDefaultMessage", e.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.whatsappDefaultMessage)}
           />
         </FormField>
@@ -165,11 +224,8 @@ export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
             placeholder="500"
             className="w-40"
             disabled={settings.deliveryMigrationPending}
-            defaultValue={
-              settings.freeDeliveryThreshold === null
-                ? ""
-                : String(settings.freeDeliveryThreshold)
-            }
+            value={values.freeDeliveryThreshold}
+            onChange={(e) => setField("freeDeliveryThreshold", e.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.freeDeliveryThreshold)}
           />
         </FormField>
@@ -187,9 +243,8 @@ export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
             placeholder="79"
             className="w-40"
             disabled={settings.deliveryMigrationPending}
-            defaultValue={
-              settings.deliveryFee === null ? "" : String(settings.deliveryFee)
-            }
+            value={values.deliveryFee}
+            onChange={(e) => setField("deliveryFee", e.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.deliveryFee)}
           />
         </FormField>
@@ -205,7 +260,8 @@ export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
             name="deliveryScopeNote"
             placeholder="across all India"
             disabled={settings.deliveryMigrationPending}
-            defaultValue={settings.deliveryScopeNote ?? ""}
+            value={values.deliveryScopeNote}
+            onChange={(e) => setField("deliveryScopeNote", e.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.deliveryScopeNote)}
           />
         </FormField>
@@ -222,7 +278,8 @@ export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
           <Input
             id="defaultSeoTitle"
             name="defaultSeoTitle"
-            defaultValue={settings.defaultSeoTitle ?? ""}
+            value={values.defaultSeoTitle}
+            onChange={(e) => setField("defaultSeoTitle", e.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.defaultSeoTitle)}
           />
         </FormField>
@@ -237,7 +294,8 @@ export function SettingsForm({ settings }: { settings: AdminSiteSettings }) {
             id="defaultSeoDescription"
             name="defaultSeoDescription"
             rows={3}
-            defaultValue={settings.defaultSeoDescription ?? ""}
+            value={values.defaultSeoDescription}
+            onChange={(e) => setField("defaultSeoDescription", e.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.defaultSeoDescription)}
           />
         </FormField>
