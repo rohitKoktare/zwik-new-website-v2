@@ -1,9 +1,28 @@
 import { z } from "zod";
 
+/**
+ * Treats a blank string the same as "unset".
+ *
+ * Blank, not omission, is the failure mode this guards against: a host's
+ * dashboard (Vercel, etc.) can have an env var configured with no value typed
+ * in, which reads back as `""`, not `undefined`. Zod's `.optional()` and
+ * `.default()` only substitute for `undefined` — left unguarded, a blank
+ * `NEXT_PUBLIC_SITE_URL` passed `.url()` validation's job to `new URL("")`
+ * downstream instead, which threw `ERR_INVALID_URL` and took down the entire
+ * production build (ironically, from inside app/layout.tsx's own attempt at a
+ * `?? "http://localhost:3000"` fallback — `??` has the same blind spot).
+ */
+function blankToUndefined(value: unknown): unknown {
+  return typeof value === "string" && value.trim() === "" ? undefined : value;
+}
+
 const publicEnvSchema = z.object({
-  NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1).optional(),
-  NEXT_PUBLIC_SITE_URL: z.string().url().default("http://localhost:3000"),
+  NEXT_PUBLIC_SUPABASE_URL: z.preprocess(blankToUndefined, z.string().url().optional()),
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.preprocess(blankToUndefined, z.string().min(1).optional()),
+  NEXT_PUBLIC_SITE_URL: z.preprocess(
+    blankToUndefined,
+    z.string().url().default("http://localhost:3000"),
+  ),
 });
 
 const parsed = publicEnvSchema.safeParse({
