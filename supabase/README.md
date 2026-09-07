@@ -3,42 +3,42 @@
 Thirteen migrations plus three helper scripts take the project from "no backend" to a
 working storefront and admin panel.
 
-> **Status: 0001–0010 applied and verified. `0011`, `0012` and `0013` are PENDING.**
->
-> Neither has been applied — the Supabase CLI is not linked in this workspace,
-> so both need your login:
->
-> ```bash
-> npx supabase link --project-ref <your-project-ref>
-> npm run db:push
-> ```
->
-> Until then:
->
-> - **0011** — the delivery fields in `/admin/settings` are disabled and the
->   storefront shows no free-delivery messaging. Both settings queries detect the
->   missing columns (`42703`), retry without them and log a warning, so the
->   WhatsApp number — the only way to order — is never taken down by the pending
->   migration.
-> - **0012** — order capture logs a failure and `/admin/orders` and
->   `/admin/customers` show empty. Ordering is unaffected: the capture is fired
->   without being awaited and never blocks the WhatsApp hand-off, by design
->   (ARCHITECTURE.md §5.1).
-> - **0013** — `/admin/campaigns` shows empty and no campaign can be created.
->   Depends on 0012, since the audience comes from `customers`.
->
-> Neither pending migration can break the storefront or stop a customer ordering.
-> That is deliberate, not luck.
->
-> A Supabase project is connected via
-> `Website4/.env.local`, migrations 0001–0010 are live, and `npm run verify:setup`
-> passes: 9 tables, 4 categories, 5 products, 14 assets, 14 Storage objects,
-> anonymous writes blocked by RLS, 1 active admin, WhatsApp ordering configured.
+> **Status: all thirteen migrations applied and verified.** `npm run verify:setup`
+> passes with no pending migrations: 14 tables total (9 core + `customers`,
+> `orders`, `order_items`, `message_campaigns`, `campaign_recipients`), 4
+> categories, 5 products, 14 assets, 14 Storage objects, anonymous writes
+> blocked by RLS, 1 active admin, WhatsApp ordering configured.
 >
 > The steps below are kept as the from-scratch runbook (a second environment, or
 > a rebuild). They are idempotent and safe to re-run against the current
 > project. **Never edit a migration that has already been applied** — add
 > `00NN_description.sql` instead.
+
+### If `supabase db push` fails with "policy already exists" on migration 0001
+
+This happened once on this project and is worth knowing about before it
+surprises you again. `supabase migration list` will show every migration with an
+empty `remote` column even though the tables plainly exist — check with
+`npm run verify:setup`.
+
+Cause: 0001–0010 were originally applied by running `supabase/ALL_MIGRATIONS.sql`
+directly (dashboard SQL editor or `psql`), not through the CLI. The tables and
+policies are real, but the CLI's own bookkeeping table
+(`supabase_migrations.schema_migrations`) has no record of it — so `db push`
+assumes nothing has run and tries 0001 again, colliding with a policy that's
+already there.
+
+Fix: tell the CLI those versions are already applied, without re-running them,
+then push only what's actually new:
+
+```bash
+npx supabase migration repair --status applied 0001 0002 0003 0004 0005 0006 0007 0008 0009 0010
+npx supabase migration list   # confirm local and remote now match for 0001–0010
+npm run db:push               # applies only what's left
+```
+
+Never run `migration repair` on a version that has *not* actually been applied
+to the database — that would make the CLI skip it forever.
 
 ---
 
