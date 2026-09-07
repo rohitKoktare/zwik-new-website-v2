@@ -133,6 +133,9 @@ async function run() {
 
   console.log(`\nDriving ${BASE_URL} at ${VIEWPORT.width}x${VIEWPORT.height}`);
 
+  /** Set by the footer counter-scroll section below; folded into the exit code. */
+  let footerBroken = false;
+
   const results = [];
   for (const path of PAGES) {
     results.push(await auditPage(page, path));
@@ -183,6 +186,82 @@ async function run() {
     console.log(`  ${present ? "present" : "MISSING"}  ${name}`);
   }
 
+  // --- The footer's two counter-scrolling bands ---
+  console.log(`\n${"=".repeat(70)}\nfooter counter-scroll\n${"=".repeat(70)}`);
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(700);
+
+  const footerProbe = () =>
+    page.evaluate(() => {
+      const x = (el) => (el ? new DOMMatrixReadOnly(getComputedStyle(el).transform).m41 : null);
+      const swatch = document.querySelector('footer [class*="zw-swatch-drift"]');
+      const word = document.querySelector('footer [class*="zw-marquee"]');
+      if (!swatch || !word) return null;
+      return {
+        swatchX: x(swatch),
+        wordX: x(word),
+        swatchDuration: parseFloat(getComputedStyle(swatch).animationDuration),
+        wordDuration: parseFloat(getComputedStyle(word).animationDuration),
+        swatchOverhang: swatch.getBoundingClientRect().width - window.innerWidth,
+        wordWidth: word.getBoundingClientRect().width,
+        viewport: window.innerWidth,
+      };
+    });
+
+  const footerFirst = await footerProbe();
+
+  if (!footerFirst) {
+    console.log("  MISSING  footer marquee bands not found");
+    footerBroken = true;
+  } else {
+    /**
+     * Direction by majority vote across short samples.
+     *
+     * One before/after pair is not enough: the swatch cycle is ~1.2s, so an
+     * interval anywhere near half a cycle can straddle the loop wrap and read
+     * backwards. Sampling at roughly a twelfth of a cycle means at most one
+     * step is a wrap, leaving the majority unambiguous.
+     */
+    const xs = { swatchX: [], wordX: [] };
+    for (let i = 0; i < 12; i++) {
+      const s = await footerProbe();
+      xs.swatchX.push(s.swatchX);
+      xs.wordX.push(s.wordX);
+      await page.waitForTimeout(100);
+    }
+    const vote = (key) => {
+      const deltas = xs[key].slice(1).map((v, i) => v - xs[key][i]);
+      return {
+        forward: deltas.filter((d) => d > 0.5).length,
+        backward: deltas.filter((d) => d < -0.5).length,
+      };
+    };
+    const sw = vote("swatchX");
+    const wd = vote("wordX");
+
+    const swatchSpeed = 144 / footerFirst.swatchDuration;
+    const wordSpeed = footerFirst.wordWidth / 2 / footerFirst.wordDuration;
+
+    // The strip runs leftward, the wordmark rightward (it carries `reverse`).
+    const opposite = sw.backward > sw.forward && wd.forward > wd.backward;
+    const faster = swatchSpeed > wordSpeed * 1.5;
+    const seamless =
+      Math.round(footerFirst.swatchOverhang) === 144 &&
+      footerFirst.wordWidth > footerFirst.viewport * 2;
+
+    console.log(
+      `  swatch  -> left  (${sw.backward} vs ${sw.forward} steps), ~${swatchSpeed.toFixed(0)} px/s`,
+    );
+    console.log(
+      `  wordmark-> right (${wd.forward} vs ${wd.backward} steps), ~${wordSpeed.toFixed(0)} px/s`,
+    );
+    console.log(`  ${opposite ? "ok      " : "FAILED  "}they counter-scroll`);
+    console.log(`  ${faster ? "ok      " : "FAILED  "}swatch is the faster band`);
+    console.log(`  ${seamless ? "ok      " : "FAILED  "}both loop without exposing a gap`);
+
+    if (!opposite || !faster || !seamless) footerBroken = true;
+  }
+
   if (consoleErrors.length) {
     console.log(`\nConsole errors (${new Set(consoleErrors).size} unique):`);
     for (const e of [...new Set(consoleErrors)].slice(0, 6)) console.log(`  ${e}`);
@@ -211,11 +290,13 @@ async function run() {
   // Stuck-hidden or never-revealed content is a real failure — the visitor
   // cannot read it. Firing early only degrades the effect, but it is the bug
   // this script exists to catch, so it fails the run too.
-  const failed = stuck > 0 || never > 0 || early > 0 || noReveals > 0;
+  const failed =
+    stuck > 0 || never > 0 || early > 0 || noReveals > 0 || footerBroken;
   console.log(
     failed
-      ? `\nFAILED: ${early} too early, ${never} never revealed, ${stuck} stuck, ${noReveals} page(s) with no reveals.\n`
-      : "\nAll reveals fire while their content is on screen.\n",
+      ? `\nFAILED: ${early} too early, ${never} never revealed, ${stuck} stuck, ` +
+          `${noReveals} page(s) with no reveals${footerBroken ? ", footer counter-scroll broken" : ""}.\n`
+      : "\nAll reveals fire while their content is on screen, and the footer bands counter-scroll.\n",
   );
   process.exit(failed ? 1 : 0);
 }

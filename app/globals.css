@@ -137,6 +137,32 @@
   }
 }
 
+/*
+ * The footer's signature-colour strip, drifting the opposite way to the
+ * wordmark beside it.
+ *
+ * Shifts by exactly one pattern cycle (144px: four 30px blocks with 6px gaps),
+ * so the loop is seamless against the repeating gradient that paints it. The
+ * element is 144px wider than its container for the same reason — otherwise
+ * translating would expose an unpainted strip at one edge.
+ *
+ * A gradient rather than a few hundred DOM nodes: the strip has to stay filled
+ * at any viewport width, and this costs one painted element instead of scaling
+ * the node count with the screen.
+ *
+ * Travels leftward, the same convention as `zw-marquee`, so that only the one
+ * element that goes the other way (the footer wordmark) carries `reverse` and
+ * the exception is obvious at the call site.
+ */
+@keyframes zw-swatch-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-144px);
+  }
+}
+
 @keyframes zw-rise {
   from {
     opacity: 0;
