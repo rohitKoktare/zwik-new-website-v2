@@ -203,31 +203,56 @@ Recorded so they are not mistaken for oversights.
   a fine pointer. The media queries are *watched*, not read once, so a hybrid
   device that gains a mouse mid-session behaves correctly.
 
-## 6. Scroll reveal — where it is applied, and when it does nothing
+## 6. Scroll reveal — how it is tuned, and why
 
-The mechanism lives in `lib/store/arm-reveal.ts` rather than inside the React
-component, so it is testable without a browser. Three overlapping release paths
-(next-frame for on-screen elements, IntersectionObserver, and a scroll sweep
-plus a 2600ms failsafe) exist because a reveal that leaves content permanently
-invisible is far worse than one that fires early.
+The mechanism lives in `lib/store/arm-reveal.ts`, separate from the React
+component, so it is unit-testable (`npm test`). But its unit tests all passed
+while the effect was still invisible on the live site — the bug was never in the
+mechanism, it was in *when* the mechanism fired. `npm run check:animations`
+drives real Chromium and answers that; it found the cause on its first run.
 
-Applied to, matching the reference's ten `data-reveal` targets:
+### What was wrong
+
+Measured on the homepage at 1440x900, **6 of 8 reveals fired before their
+content was on screen**. Two independent causes:
+
+1. **A fractional `threshold` scales with the element.** At `threshold: 0.08`, a
+   510px block fired with 9% of it showing and a full-height section fired the
+   instant its top edge grazed the viewport. The trigger is now expressed purely
+   as `rootMargin: 0px 0px -25% 0px` with `threshold: 0`, which is measured
+   against the viewport and so behaves identically at any element height.
+
+2. **The failsafe released everything unconditionally after 2600ms.** A visitor
+   who reads the hero for three seconds before scrolling had every reveal on the
+   page fire while it was still far below the fold. It is now 8000ms *and*
+   position-aware: it only releases content the visitor could actually be
+   looking at, and reschedules otherwise, so nothing is stranded either.
+
+Reveals were also wrapped around whole sections from the page file. That is what
+left "Small enough to post. Big enough to mean something." with no animation of
+its own. Reveals now sit on the content blocks inside each section.
+
+### Where it is applied
+
+27 wrappers across five pages, all verified firing on screen:
 
 | Surface | Stagger |
 | --- | --- |
-| Home: category tiles, catalog strip, gifting block, reviews block, bulk teaser | none |
-| Home: the three gifting steps | 60 / 180 / 300ms |
-| Home: each review card | 120ms apart |
-| Catalog grid: each product card | 60ms apart, capped at 7 steps |
+| Home: each category tile | 90ms apart |
+| Home: catalog heading | none |
+| Home: gifting copy column | none |
+| Home: the three gifting steps | 60 / 180 / 300ms (the reference's values) |
+| Home: reviews heading, then each card | 120ms apart |
+| Home: bulk teaser copy | none |
+| Catalog: each product card | 60ms apart, capped at 7 steps |
 | PDP: related products | none |
+| About: hero copy, then each value | 110ms apart |
+| Bulk gifting: hero copy, then each terms row | 70ms apart |
+| Contact: heading, then the buttons | 120ms |
 
-**It does nothing at all when the visitor has reduced motion enabled** — which
-is the first thing to check if the animation seems missing. On Windows that is
-Settings → Accessibility → Visual effects → Animation effects; on macOS,
-System Settings → Accessibility → Display → Reduce motion. That is deliberate:
-`prefers-reduced-motion: reduce` is a request not to animate, and it also
-disables the custom cursor, the gallery tilt, the marquee and the hero drift.
+### It still does nothing under reduced motion
 
-The second thing to check: a section already on screen when the page loads
-reveals immediately rather than on scroll, so on a tall window the first
-sections animate during load and only the lower ones animate as you scroll.
+`prefers-reduced-motion: reduce` disables the reveal, the custom cursor, the
+gallery tilt, the marquee and the hero drift. That is deliberate. On Windows the
+setting is Settings → Accessibility → Visual effects → Animation effects; on
+macOS, System Settings → Accessibility → Display → Reduce motion.

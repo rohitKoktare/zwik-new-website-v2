@@ -46,6 +46,8 @@ For a brand-new Supabase project instead, follow `supabase/README.md`.
 | `npm run db:push` | Apply pending migrations |
 | `npm run seed:storage` | Upload seed product photography to Storage |
 | `npm run create:admin` | Create an admin user (prints a one-time password) |
+| `npm test` | Unit tests for the pure logic (reveal trigger, campaign messages, phone normalisation) |
+| `npm run check:animations` | Drives the real site in Chromium and reports what the animations do. Needs `npm run dev` running |
 | `npm run verify:setup` | End-to-end backend health check, including an RLS probe |
 
 ## Layout

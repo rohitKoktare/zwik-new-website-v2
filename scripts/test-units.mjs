@@ -21,10 +21,8 @@
  */
 
 let failures = 0;
-let suite = "";
 
 function describe(name) {
-  suite = name;
   console.log(`\n${name}`);
 }
 
