@@ -13,7 +13,8 @@
     "create:admin": "node scripts/create-admin.mjs",
     "verify:setup": "node scripts/verify-setup.mjs",
     "test": "node --experimental-strip-types scripts/test-units.mjs",
-    "check:animations": "node scripts/check-animations.mjs"
+    "check:animations": "node scripts/check-animations.mjs",
+    "check:mobile-nav": "node scripts/check-mobile-nav.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
