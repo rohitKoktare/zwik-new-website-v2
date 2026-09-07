@@ -31,6 +31,24 @@ const PENDING_MIGRATION_TABLES = [
   { table: "order_items", migration: "0012_customers_and_orders.sql" },
   { table: "message_campaigns", migration: "0013_message_campaigns.sql" },
   { table: "campaign_recipients", migration: "0013_message_campaigns.sql" },
+  { table: "order_number_counters", migration: "0014_order_numbers_and_tracking.sql" },
+];
+
+/**
+ * Tables the anon key must never read a single row from.
+ *
+ * These hold personal data and sales records, protected by having no
+ * client-readable RLS policy at all rather than by a restrictive one. That is
+ * easy to undo by accident — adding one permissive policy while debugging is
+ * enough — and the damage is invisible until someone enumerates it.
+ */
+const PRIVATE_TABLES = [
+  "customers",
+  "orders",
+  "order_items",
+  "message_campaigns",
+  "campaign_recipients",
+  "order_number_counters",
 ];
 
 /** Columns added by a migration, checked the same way. */
@@ -126,6 +144,33 @@ if (anonReadError) {
 const { data: anonAudit } = await anon.from("audit_logs").select("id").limit(1);
 if (anonAudit && anonAudit.length > 0) bad("SECURITY: audit_logs is readable anonymously");
 else ok("audit_logs is not publicly readable");
+
+/*
+ * 5b. Personal data and sales records must be invisible to the anon key.
+ *
+ * Compared against a service-role read rather than just asserting "anon saw
+ * nothing": with RLS on and no policies, PostgREST returns an empty array and
+ * no error, which is indistinguishable from an empty table. So a table the
+ * service role also finds empty is reported as inconclusive, not as a pass —
+ * claiming a security check passed when it could not have failed is how the
+ * old head:true table check went wrong.
+ */
+for (const table of PRIVATE_TABLES) {
+  const [{ data: anonRows, error: anonError }, { count: realCount }] = await Promise.all([
+    anon.from(table).select("*").limit(1),
+    admin.from(table).select("*", { count: "exact", head: true }),
+  ]);
+
+  if (anonRows && anonRows.length > 0) {
+    bad(`SECURITY: ${table} is readable anonymously — it holds data the public must not see`);
+  } else if ((realCount ?? 0) === 0) {
+    info(`${table} is empty, so its read-isolation check proves nothing yet`);
+  } else if (anonError) {
+    ok(`${table} is not publicly readable (${realCount} row(s) hidden)`);
+  } else {
+    ok(`${table} is not publicly readable (${realCount} row(s) hidden, 0 returned to anon)`);
+  }
+}
 
 // 6. Storage bucket exists and objects are present.
 const { data: bucket, error: bucketError } = await admin.storage.getBucket(BUCKET);
