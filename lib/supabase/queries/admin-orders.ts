@@ -1,0 +1,206 @@
+import "server-only";
+import { createClient } from "@/lib/supabase/server";
+import { isSupabaseConfigured } from "@/lib/validation/env";
+import { logQueryFailure } from "@/lib/supabase/pending-migration";
+import type { Pagination } from "@/lib/admin/pagination";
+import { ORDER_STATUSES, type Order, type OrderStatus } from "@/types/order";
+
+/**
+ * Admin order reads.
+ *
+ * These rows contain personal data via the joined customer, so every query here
+ * goes through the RLS-enforced client (`lib/supabase/server.ts`) rather than
+ * the service-role one. The `customers`/`orders` policies from migration 0012
+ * are admin-only, so a non-admin session sees nothing even if it reaches this
+ * code — the RLS check is not delegated to the page's `requireAdmin()`.
+ *
+ * Generated database types do not exist yet, so row shapes are declared
+ * explicitly (DEVELOPMENT_STANDARDS.md §4).
+ */
+
+export type AdminOrder = Order & {
+  /** Null when the order was placed with no phone, or the customer was erased. */
+  customerName: string | null;
+  customerPhone: string | null;
+  itemCount: number;
+};
+
+/** Validates an untrusted `?status=` value (DEVELOPMENT_STANDARDS.md §7). */
+export function parseOrderStatusFilter(value?: string): OrderStatus | undefined {
+  const allowed: readonly string[] = ORDER_STATUSES;
+  return value !== undefined && allowed.includes(value) ? (value as OrderStatus) : undefined;
+}
+
+type JoinedCustomer = { id: string; name: string | null; phone: string };
+
+type OrderItemRow = {
+  id: string;
+  product_id: string | null;
+  sku: string | null;
+  name: string;
+  unit_price: number | string;
+  qty: number;
+  line_total: number | string;
+};
+
+type OrderRow = {
+  id: string;
+  customer_id: string | null;
+  status: OrderStatus;
+  subtotal: number | string;
+  delivery_charge: number | string | null;
+  delivery_label: string | null;
+  total: number | string;
+  currency: string;
+  gift_wrap: boolean;
+  customer_note: string | null;
+  source: string;
+  created_at: string;
+  confirmed_at: string | null;
+  cancelled_at: string | null;
+  customer: JoinedCustomer | JoinedCustomer[] | null;
+  order_items: OrderItemRow[] | null;
+};
+
+const ORDER_SELECT = `
+  id, customer_id, status, subtotal, delivery_charge, delivery_label, total, currency,
+  gift_wrap, customer_note, source, created_at, confirmed_at, cancelled_at,
+  customer:customers(id, name, phone),
+  order_items(id, product_id, sku, name, unit_price, qty, line_total)
+`;
+
+/** PostgREST embeds a to-one relation as an object or a single-item array. */
+function firstOrNull<T>(value: T | T[] | null): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value;
+}
+
+function toAdminOrder(row: OrderRow): AdminOrder {
+  const customer = firstOrNull(row.customer);
+
+  const items = (row.order_items ?? []).map((item) => ({
+    id: item.id,
+    productId: item.product_id,
+    sku: item.sku,
+    name: item.name,
+    unitPrice: Number(item.unit_price),
+    qty: item.qty,
+    lineTotal: Number(item.line_total),
+  }));
+
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    status: row.status,
+    subtotal: Number(row.subtotal),
+    deliveryCharge: row.delivery_charge === null ? null : Number(row.delivery_charge),
+    deliveryLabel: row.delivery_label,
+    total: Number(row.total),
+    currency: row.currency,
+    giftWrap: row.gift_wrap,
+    customerNote: row.customer_note,
+    source: row.source,
+    createdAt: row.created_at,
+    confirmedAt: row.confirmed_at,
+    cancelledAt: row.cancelled_at,
+    items,
+    customerName: customer?.name ?? null,
+    customerPhone: customer?.phone ?? null,
+    itemCount: items.reduce((sum, item) => sum + item.qty, 0),
+  };
+}
+
+/**
+ * Paginated admin list, newest first. Bounded by `.range()` like every admin
+ * list (DATABASE_DESIGN.md §19).
+ */
+export async function listOrdersForAdmin(options: {
+  pagination: Pagination;
+  status?: OrderStatus;
+  customerId?: string;
+  search?: string;
+}): Promise<{ orders: AdminOrder[]; totalCount: number }> {
+  if (!isSupabaseConfigured) return { orders: [], totalCount: 0 };
+
+  const supabase = await createClient();
+  let query = supabase
+    .from("orders")
+    .select(ORDER_SELECT, { count: "exact" })
+    .order("created_at", { ascending: false })
+    .range(options.pagination.from, options.pagination.to);
+
+  if (options.status) query = query.eq("status", options.status);
+  if (options.customerId) query = query.eq("customer_id", options.customerId);
+
+  if (options.search) {
+    // Phone search only — searching a name would need an embedded-resource
+    // filter, and a phone number is what ZWIK actually has to hand from a
+    // WhatsApp thread. Digits only, so nothing needs escaping.
+    const digits = options.search.replace(/[^0-9]/g, "");
+    if (digits) query = query.eq("customer.phone", digits);
+  }
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    logQueryFailure("listOrdersForAdmin", error, "orders");
+    return { orders: [], totalCount: 0 };
+  }
+
+  return {
+    orders: ((data ?? []) as unknown as OrderRow[]).map(toAdminOrder),
+    totalCount: count ?? 0,
+  };
+}
+
+export async function getOrderById(id: string): Promise<AdminOrder | null> {
+  if (!isSupabaseConfigured) return null;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("orders")
+    .select(ORDER_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    logQueryFailure("getOrderById", error, "orders");
+    return null;
+  }
+
+  return data ? toAdminOrder(data as unknown as OrderRow) : null;
+}
+
+/** Counts per status, for the dashboard and the list's filter chips. */
+export async function countOrdersByStatus(): Promise<Record<OrderStatus, number>> {
+  const empty: Record<OrderStatus, number> = {
+    initiated: 0,
+    confirmed: 0,
+    cancelled: 0,
+    fulfilled: 0,
+  };
+
+  if (!isSupabaseConfigured) return empty;
+
+  const supabase = await createClient();
+
+  // One HEAD count per status. Four cheap index-only queries beat fetching
+  // every row to tally client-side.
+  const results = await Promise.all(
+    ORDER_STATUSES.map(async (status) => {
+      const { count, error } = await supabase
+        .from("orders")
+        .select("id", { count: "exact", head: true })
+        .eq("status", status);
+
+      if (error) {
+        logQueryFailure("countOrdersByStatus", error, "orders");
+        return [status, 0] as const;
+      }
+
+      return [status, count ?? 0] as const;
+    }),
+  );
+
+  return { ...empty, ...Object.fromEntries(results) };
+}

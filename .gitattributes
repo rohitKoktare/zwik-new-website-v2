@@ -1,0 +1,19 @@
+# Normalise line endings so a Windows checkout and a Linux CI runner agree.
+# Without this, every file shows as modified when the repo moves between them.
+* text=auto eol=lf
+
+# Binary — never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.avif binary
+*.ico binary
+*.mp4 binary
+*.webm binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+
+# Generated: collapse in diffs and don't count toward language stats.
+package-lock.json linguist-generated=true -diff
