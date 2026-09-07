@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "db:push": "supabase db push",
+    "db:push": "npx supabase db push",
     "seed:storage": "node scripts/seed-storage.mjs",
     "create:admin": "node scripts/create-admin.mjs",
     "verify:setup": "node scripts/verify-setup.mjs",
