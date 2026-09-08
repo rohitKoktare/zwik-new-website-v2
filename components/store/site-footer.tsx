@@ -162,16 +162,20 @@ export function SiteFooter({
       </div>
 
       {/*
-        Band 3 — the signature colours and the oversized wordmark, drifting in
+        Band 3 — the signature colours and the wordmark line, drifting in
         opposite directions at deliberately different speeds: the strip is
         brisk, the wordmark is a slow ambient crawl. Reading the two against
         each other is the whole effect, so the speeds are meant to differ by a
         lot rather than a little.
 
-        Both are decorative and aria-hidden — the wordmark repeats "ZWIK" a
-        dozen times to fill the loop, which is meaningless to a screen reader.
-        Both also freeze under prefers-reduced-motion via the global rule in
-        globals.css; nothing extra is needed here.
+        The wordmark is one sentence — "ZWIK · Your own miniature world" — not
+        the word "ZWIK" tiled edge to edge. A wall of repeated text reads as
+        wallpaper; a single phrase reads as a line someone could say.
+
+        Both are decorative and aria-hidden (the same line is already present,
+        legibly, in Band 2 and the legal bar). Both also freeze under
+        prefers-reduced-motion via the global rule in globals.css; nothing
+        extra is needed here.
       */}
       <div aria-hidden className="border-t border-[var(--gray-90)]">
         <div className="overflow-hidden py-5">
@@ -195,26 +199,28 @@ export function SiteFooter({
 
         {/*
           `w-max` with two identical halves and a -50% translate is what makes
-          the loop seamless. The trailing space is padding on each copy rather
-          than a flex `gap`, so both halves are exactly the same width — with a
-          gap between them, -50% lands half a gap off and the seam shows.
+          the loop seamless — the moment the first copy scrolls fully out, the
+          second is exactly where the first began. `pr-[0.6em]` is the gap
+          before the next copy enters, and it's on both halves equally so they
+          stay the same width; a flex `gap` instead would land -50% half a gap
+          off and the seam would show.
         */}
-        <div className="overflow-hidden">
+        <div className="overflow-hidden pb-6">
           {/* `reverse` is what sends the wordmark rightward, against the
               colour strip above it. zw-marquee itself must stay leftward —
-              the header's announcement ticker shares it. */}
-          <div className="flex w-max animate-[zw-marquee_80s_linear_infinite_reverse] will-change-transform">
+              the header's announcement ticker shares it. Duration is picked
+              for px/second, not for the loop length — a single phrase covers
+              far less distance than the old 16-word wall did, so it needed a
+              shorter duration to keep the same ambient crawl speed rather than
+              slow to a crawl-within-a-crawl. */}
+          <div className="flex w-max animate-[zw-marquee_26s_linear_infinite_reverse] will-change-transform">
             {[0, 1].map((half) => (
-              <div key={half} className="flex shrink-0">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <span
-                    key={i}
-                    className="-mb-[0.16em] block pr-[0.18em] text-[clamp(72px,15.5vw,240px)] leading-[0.82] font-semibold tracking-[-0.06em] whitespace-nowrap text-white opacity-[0.09] select-none"
-                  >
-                    ZWIK
-                  </span>
-                ))}
-              </div>
+              <span
+                key={half}
+                className="block shrink-0 pr-[0.6em] text-[clamp(36px,6vw,96px)] leading-[1.1] font-semibold tracking-[-0.02em] whitespace-nowrap text-white opacity-[0.14] select-none"
+              >
+                ZWIK &middot; Your own miniature world
+              </span>
             ))}
           </div>
         </div>

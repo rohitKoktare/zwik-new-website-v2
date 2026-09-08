@@ -197,6 +197,7 @@ async function run() {
       const swatch = document.querySelector('footer [class*="zw-swatch-drift"]');
       const word = document.querySelector('footer [class*="zw-marquee"]');
       if (!swatch || !word) return null;
+      const halves = [...word.children].map((el) => el.getBoundingClientRect().width);
       return {
         swatchX: x(swatch),
         wordX: x(word),
@@ -204,6 +205,7 @@ async function run() {
         wordDuration: parseFloat(getComputedStyle(word).animationDuration),
         swatchOverhang: swatch.getBoundingClientRect().width - window.innerWidth,
         wordWidth: word.getBoundingClientRect().width,
+        wordHalves: halves,
         viewport: window.innerWidth,
       };
     });
@@ -245,9 +247,20 @@ async function run() {
     // The strip runs leftward, the wordmark rightward (it carries `reverse`).
     const opposite = sw.backward > sw.forward && wd.forward > wd.backward;
     const faster = swatchSpeed > wordSpeed * 1.5;
+    /*
+     * Seamless means a -50% translate lands exactly where the loop started,
+     * which only holds if the row is exactly two children of equal width —
+     * true regardless of how wide the content is or how many words it holds,
+     * so this doesn't assume anything about viewport size or word count (the
+     * wordmark used to be a wall of 16 tiled "ZWIK"s and is now a single
+     * "ZWIK · Your own miniature world" phrase; this check is agnostic to
+     * either).
+     */
+    const [half0, half1] = footerFirst.wordHalves ?? [];
     const seamless =
       Math.round(footerFirst.swatchOverhang) === 144 &&
-      footerFirst.wordWidth > footerFirst.viewport * 2;
+      footerFirst.wordHalves?.length === 2 &&
+      Math.abs(half0 - half1) < 1;
 
     console.log(
       `  swatch  -> left  (${sw.backward} vs ${sw.forward} steps), ~${swatchSpeed.toFixed(0)} px/s`,
