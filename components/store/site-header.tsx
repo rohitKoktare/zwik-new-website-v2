@@ -12,6 +12,10 @@ const NAV_LINKS = [
   { href: "/", label: "Home" },
   { href: "/products", label: "Catalog" },
   { href: "/bulk-gifting", label: "Bulk gifting" },
+  // Points at the list, not straight at /orders/login: a signed-in customer
+  // lands on their orders immediately, and requireCustomer() (the page's own
+  // guard) sends anyone else to /orders/login. One link handles both.
+  { href: "/orders", label: "My orders" },
   { href: "/about", label: "About" },
 ];
 
