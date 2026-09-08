@@ -8,6 +8,7 @@ import { LOGIN_PATH } from "@/lib/auth/guard";
 import { recordAuditEvent } from "@/lib/audit";
 import { logger } from "@/lib/logger";
 import { isSupabaseConfigured } from "@/lib/validation/env";
+import { checkRateLimit } from "@/lib/rate-limit";
 import {
   actionError,
   parseForm,
@@ -25,6 +26,15 @@ const signInSchema = z.object({
  * attacker enumerate which addresses are admins.
  */
 const GENERIC_SIGN_IN_ERROR = "Those credentials aren't valid.";
+const RATE_LIMIT_ERROR = "Too many attempts. Please try again in a few minutes.";
+
+/**
+ * Stricter than customer sign-in (20/10min): this gates full admin control
+ * over products, orders and customers, and there is normally exactly one
+ * admin account, so there is no legitimate reason for a burst of attempts.
+ */
+const MAX_ATTEMPTS = 10;
+const WINDOW_MINUTES = 15;
 
 export async function signInAction(
   _prev: ActionResult,
@@ -34,6 +44,10 @@ export async function signInAction(
     return actionError(
       "Supabase isn't configured on this deployment, so sign-in is unavailable.",
     );
+  }
+
+  if (!(await checkRateLimit("admin-login", { maxAttempts: MAX_ATTEMPTS, windowMinutes: WINDOW_MINUTES }))) {
+    return actionError(RATE_LIMIT_ERROR);
   }
 
   const parsed = parseForm(signInSchema, formData);
@@ -46,6 +60,15 @@ export async function signInAction(
 
   if (error || !data.user) {
     logger.warn("Admin sign-in rejected", { reason: error?.message ?? "no user" });
+    // No entityId: a wrong email/password never resolves to a real user id,
+    // and the email itself does not belong in an audit row (scrub() would
+    // redact it anyway, but it should never be typed in the first place).
+    await recordAuditEvent({
+      actorId: null,
+      action: "login_failed",
+      entityType: "profile",
+      metadata: { reason: "invalid_credentials" },
+    });
     return actionError(GENERIC_SIGN_IN_ERROR);
   }
 

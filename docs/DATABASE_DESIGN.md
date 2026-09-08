@@ -178,6 +178,13 @@ Foreign keys:
 
 Use explicit deletion behavior. Avoid accidental cascade deletion of shared assets.
 
+`product_assets_public_read` (migration 0004) originally checked only the
+linked product's `is_active` flag, not the linked asset's own `status` —
+meaning an archived asset stayed visible through this join table as long as
+its product was still active, even though `assets_public_read` correctly
+hides that same asset from a direct `assets` query. Migration 0017 tightened
+the policy to require both: `p.is_active = true and a.status = 'active'`.
+
 ## 8. reviews
 
 Because ordering happens over WhatsApp rather than through an on-site checkout, the site cannot verify a purchase. Reviews shown on ZWIK are therefore marketing/content data, not verified-purchase reviews.
@@ -242,6 +249,19 @@ Possible fields:
 Do not store secrets in this general settings table.
 
 If analytics IDs are stored here, distinguish public identifiers from secret credentials.
+
+**Known, deliberately unfixed:** `site_settings_public_read` (migration 0007)
+is an unconditional `for select using (true)`, so `updated_by` (a raw
+`profiles.id` UUID) and `updated_at` are readable by the anon key alongside
+the genuinely public fields. Row Level Security filters *rows*, not columns —
+there is no policy-only fix; the real fix is a public-facing view exposing
+only the intended columns, or moving `updated_by`/`updated_at` to an
+admin-only table. Not done here: `profiles` itself has no public read policy
+(only `profiles_select_own`, gated on `auth.uid() = id`), so the exposed UUID
+cannot be resolved to a name or email through Postgres alone — the actual
+impact today is a bare internal identifier, not a data leak. Worth the view
+refactor before this table gains a field that would make the distinction
+matter more.
 
 ## 11. audit_logs
 
@@ -599,9 +619,21 @@ shows up under real concurrency, which is exactly when it matters.
 
 `security definer` because the function must write a table nothing else may
 touch. RLS is **enabled with no policies at all**: PostgREST can therefore
-reach it through neither the anon nor the authenticated key, while the definer
-function bypasses RLS by design. An empty-policy table is not an oversight here
-— it is the point.
+reach the *table* through neither the anon nor the authenticated key, while
+the definer function bypasses RLS by design. An empty-policy table is not an
+oversight here — it is the point.
+
+That protects the table, but not the *function* by itself: `security definer`
+does not imply a locked-down `EXECUTE` grant, and Postgres grants a new
+function's execute to `PUBLIC` by default. Until migration 0017,
+`next_order_number()` could be called directly via `supabase.rpc()` with the
+anon key — confirmed live, not just inferred — which advanced the real
+monthly counter and skipped a number that would otherwise have gone to a real
+order. 0017 revokes execute from `public`/`anon`/`authenticated`; the only
+legitimate caller, the `set_order_number()` trigger, runs as the table owner
+regardless of grants, so this cost nothing. See
+docs/ARCHITECTURE.md §16.3 for why the same fix is *not* safe to apply to
+every `security definer` function without checking each one first.
 
 The period comes from `to_char(now() at time zone 'Asia/Kolkata', 'YYMM')` so
 the month rolls over at IST midnight. Using UTC would restart numbering 5½ hours

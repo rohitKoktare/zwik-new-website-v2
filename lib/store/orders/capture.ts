@@ -5,6 +5,7 @@ import { isSupabaseConfigured } from "@/lib/validation/env";
 import { getSiteSettings } from "@/lib/supabase/queries/settings";
 import { getDeliveryQuote, getDeliveryTerms } from "@/lib/store/delivery";
 import { orderCaptureSchema, type OrderCaptureInput } from "@/lib/validation/order";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
 /**
@@ -34,6 +35,14 @@ import { logger } from "@/lib/logger";
  * 4. **Consent is never inferred.** Placing an order is consent to be contacted
  *    about that order. Marketing consent is a separate, explicit tick, and an
  *    earlier unsubscribe is never overwritten here.
+ *
+ * 5. **It is rate-limited.** This is the one anonymous write path in the app
+ *    (docs/ARCHITECTURE.md's own roadmap flagged this as outstanding), so
+ *    nothing bounded how many orders one source could script. Uses the same
+ *    sliding-window throttle as sign-in (lib/rate-limit.ts), under its own
+ *    bucket so a checkout flood and a sign-in flood from the same IP don't
+ *    interfere with each other. A rejection here degrades exactly like any
+ *    other capture failure — rule 3 still holds.
  */
 
 /** A repeat submission inside this window updates the same order. */
@@ -70,6 +79,11 @@ type ProductPriceRow = {
 
 export async function captureOrderAction(input: OrderCaptureInput): Promise<CaptureResult> {
   if (!isSupabaseConfigured) return { ok: false, reason: "supabase_not_configured" };
+
+  if (!(await checkRateLimit("checkout", { maxAttempts: 10, windowMinutes: 10 }))) {
+    logger.warn("captureOrderAction rate-limited");
+    return { ok: false, reason: "rate_limited" };
+  }
 
   // 1. Validate. The client is a browser we do not control.
   const parsed = orderCaptureSchema.safeParse(input);

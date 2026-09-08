@@ -54,22 +54,7 @@ export const isSupabaseConfigured = Boolean(
   publicEnv.supabaseUrl && publicEnv.supabaseAnonKey,
 );
 
-const serverEnvSchema = z.object({
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
-});
-
-/**
- * Server-only environment access. Import only from server-side modules
- * (lib/supabase/admin.ts guards this further with the `server-only` package).
- */
-export function readServerEnv() {
-  const result = serverEnvSchema.safeParse({
-    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
-  });
-
-  if (!result.success) {
-    throw new Error("Invalid server environment variables");
-  }
-
-  return result.data;
-}
+// Server-only env access (SUPABASE_SERVICE_ROLE_KEY) lives in
+// lib/validation/server-env.ts, guarded by the `server-only` package — not
+// here, since this file's publicEnv/isSupabaseConfigured are legitimately
+// imported by client-side code (lib/supabase/client.ts).

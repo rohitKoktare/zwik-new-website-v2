@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { publicEnv } from "@/lib/validation/env";
-import { readServerEnv } from "@/lib/validation/env";
+import { readServerEnv } from "@/lib/validation/server-env";
 
 /**
  * Service-role Supabase client for privileged, server-only operations

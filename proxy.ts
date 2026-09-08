@@ -15,6 +15,16 @@ export async function proxy(request: NextRequest) {
   }
 
   const supabase = createServerClient(publicEnv.supabaseUrl, publicEnv.supabaseAnonKey, {
+    // Must match lib/supabase/server.ts's cookieOptions exactly — this proxy
+    // reissues the same session cookie on every /admin request, and a
+    // mismatch would silently drop httpOnly/secure back to @supabase/ssr's
+    // insecure defaults on refresh even after server.ts sets them correctly
+    // on sign-in.
+    cookieOptions: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    },
     cookies: {
       getAll() {
         return request.cookies.getAll();

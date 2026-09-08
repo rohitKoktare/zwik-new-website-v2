@@ -1,13 +1,14 @@
 # Supabase setup
 
-Thirteen migrations plus three helper scripts take the project from "no backend" to a
-working storefront and admin panel.
+A growing set of migrations (see the table below for the current count) plus three
+helper scripts take the project from "no backend" to a working storefront and
+admin panel.
 
-> **Status: all thirteen migrations applied and verified.** `npm run verify:setup`
-> passes with no pending migrations: 14 tables total (9 core + `customers`,
-> `orders`, `order_items`, `message_campaigns`, `campaign_recipients`), 4
-> categories, 5 products, 14 assets, 14 Storage objects, anonymous writes
-> blocked by RLS, 1 active admin, WhatsApp ordering configured.
+> **Status: run `npm run verify:setup` for the current picture** — table counts,
+> pending migrations, seed data, and the RLS/anon-lockdown checks. Numbers here
+> would go stale the moment a new migration ships, which is exactly what
+> happened to this section once before; treat the command as the source of
+> truth, not this paragraph.
 >
 > The steps below are kept as the from-scratch runbook (a second environment, or
 > a rebuild). They are idempotent and safe to re-run against the current
@@ -112,6 +113,7 @@ Then `npm run dev` and sign in at <http://localhost:3000/admin/login>.
 | `0014_order_numbers_and_tracking.sql` | `orders.order_number` + `orders.public_token`, `order_number_counters` and the atomic `next_order_number()` |
 | `0015_customer_login_sessions.sql` | `customer_sessions`, `otp_codes`, `login_attempts` — phone sign-in, no `auth.users` involved (see DATABASE_DESIGN.md §28) |
 | `0016_lock_down_login_attempt_rpc.sql` | Revokes the default PUBLIC `EXECUTE` grant on `record_login_attempt()` — a security-definer function is otherwise callable directly by the anon key regardless of table RLS |
+| `0017_security_hardening_pass.sql` | Revokes the same default PUBLIC grant on `next_order_number()`; tightens `product_assets_public_read` to also require the linked asset be active, not just the product |
 
 Every table has RLS enabled with public-read / admin-write policies. There is no
 `authenticated users can do everything` policy anywhere — writes require an
@@ -141,4 +143,9 @@ so a newly added review stays invisible until you feature it.
   locally. That's why step 2 above isn't optional.
 - **Adding a migration** — create `00NN_description.sql`, keep it idempotent
   (`if not exists`, `on conflict do nothing`), and review its RLS impact before
-  pushing. Never edit a migration that has already been applied.
+  pushing. Never edit a migration that has already been applied. Also
+  regenerate `ALL_MIGRATIONS.sql` (concatenate every file in
+  `supabase/migrations/` under its existing header format) — it drifted out of
+  sync once already (stopped at 0010 while 0011-0016 shipped), and it is the
+  documented from-scratch runbook above, so a stale copy silently produces an
+  incomplete database for anyone who follows it.

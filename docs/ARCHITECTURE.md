@@ -485,6 +485,82 @@ registration step outside this codebase. `lib/customer-auth/otp-provider.ts`
 is the single place this flips on once `OTP_PROVIDER` is set — nothing else
 about the flow needs to change when it does.
 
+### 16.2 Rate limiting
+
+A single shared throttle, `lib/rate-limit.ts`'s `checkRateLimit(bucket, opts)`,
+guards every unauthenticated attempt-style action: customer sign-in
+(`lib/customer-auth/rate-limit.ts`), admin sign-in (`lib/auth/actions.ts`), and
+checkout (`lib/store/orders/capture.ts`'s `captureOrderAction` — the one
+anonymous write path). Each caller passes its own `bucket` string, which is
+hashed together with the caller's IP before being checked against
+`login_attempts` (migration 0015) via the atomic `record_login_attempt()` RPC
+— namespacing means hammering one of these three doesn't throttle the other
+two for someone sharing an IP (an office network, a VPN exit node). Admin
+sign-in is the strictest (10/15min): there is normally exactly one admin
+account, so there is no legitimate reason for a burst of attempts against it.
+Every check fails open (returns "allowed") if the rate-limit RPC itself
+errors — a broken limiter must not lock out every legitimate sign-in or sale.
+
+### 16.3 Security-definer function grants
+
+Postgres grants `EXECUTE` on a new function to `PUBLIC` by default, even a
+`security definer` one — this is easy to miss, since the function still
+correctly bypasses RLS for its own privileged write, but the grant is a
+*separate* check that has nothing to do with RLS. Two functions were found
+this way (`record_login_attempt()`, `next_order_number()`) and fixed with an
+explicit `revoke execute ... from public/anon/authenticated` (migrations 0016,
+0017): both are called only from server code or a trigger, never from inside
+another table's RLS policy, so revoking their grants is unconditionally safe.
+
+**`is_admin()` is deliberately left alone.** It is also `security definer`
+with an unrevoked grant, and calling it directly via the anon key proves
+nothing (it only evaluates `auth.uid()` against the caller's own session, so
+there is no cross-user probe available) — but unlike the two functions above,
+`is_admin()` is referenced *inside* other tables' own RLS policies (e.g.
+`products_admin_write for all using (is_admin())`, sitting alongside
+`products_public_read for select using (is_active = true)` on the same
+table). Revoking `anon`'s execute grant on it risks Postgres needing to
+evaluate `is_admin()` while checking whether *any* permissive policy passes
+for an anonymous `SELECT` — if the planner does not short-circuit before
+reaching it for a given row, the query would fail with a permission error
+instead of just filtering rows, breaking anonymous reads of products,
+categories, and everything else `is_admin()` is used to gate writes on. The
+security benefit of revoking it is effectively nil; the regression risk from
+getting the short-circuit assumption wrong is not. Any function referenced
+inside another table's RLS predicate should get this same scrutiny before its
+grant is touched — it is not safe to assume every `security definer` function
+can be locked down the way 0016/0017 did.
+
+### 16.4 Session cookies and HTTP headers
+
+Both session cookies on the site — the admin's Supabase Auth session
+(`lib/supabase/server.ts`, `proxy.ts`) and the customer's phone sign-in
+session (`lib/customer-auth/session.ts`) — are explicitly set with
+`httpOnly: true` and `secure` conditioned on `NODE_ENV === "production"`.
+`@supabase/ssr`'s own default for a server client is `httpOnly: false` and no
+`secure` (see `node_modules/@supabase/ssr/dist/main/utils/constants.js`) —
+fine for its browser client, wrong for a server-issued session cookie, since
+it would otherwise be readable by any same-origin script. `server.ts` and
+`proxy.ts` must set matching `cookieOptions`, since the proxy reissues the
+same cookie on every `/admin` request; a mismatch would silently drop the
+flags back to the insecure default on refresh even after sign-in set them
+correctly.
+
+`next.config.ts` sets `Content-Security-Policy`, `X-Frame-Options`,
+`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, and
+`Strict-Transport-Security` on every response, and disables `X-Powered-By`.
+The CSP is deliberately **not** nonce-based, even though Next's own docs
+recommend nonces for a strict policy — nonces require every page to render
+dynamically per request, which conflicts directly with this site's
+intentionally static/ISR storefront (§15). The trade-off is `'unsafe-inline'`
+on `script-src` (Next's App Router streams inline hydration scripts
+regardless of CSP mode) and `style-src` (this codebase uses React's
+`style={{...}}` prop extensively, which renders as an inline attribute
+governed by `style-src`). See the comment above `contentSecurityPolicy()` in
+`next.config.ts` for the full reasoning, including why this is a bounded,
+defense-in-depth trade-off rather than a live gap (no
+`dangerouslySetInnerHTML` exists anywhere in this codebase today).
+
 ## 17. Observability
 
 Centralized logging should distinguish:
@@ -546,7 +622,6 @@ Later, if requirements justify it:
 - WhatsApp Business Platform (Cloud API) for automated replies and campaigns,
   instead of prefilled `wa.me` links a human sends
 - Stock decrementing and fulfilment tracking on the persisted `orders` entity
-- Rate limiting on `captureOrderAction`, the one anonymous write path
 - Multiple admin roles
 - Advanced search
 - Additional markets
