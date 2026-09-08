@@ -110,6 +110,8 @@ Then `npm run dev` and sign in at <http://localhost:3000/admin/login>.
 | `0012_customers_and_orders.sql` | `customers`, `orders`, `order_items` — personal data, admin-only RLS |
 | `0013_message_campaigns.sql` | `message_campaigns`, `campaign_recipients` — consent-gated campaign worklist |
 | `0014_order_numbers_and_tracking.sql` | `orders.order_number` + `orders.public_token`, `order_number_counters` and the atomic `next_order_number()` |
+| `0015_customer_login_sessions.sql` | `customer_sessions`, `otp_codes`, `login_attempts` — phone sign-in, no `auth.users` involved (see DATABASE_DESIGN.md §28) |
+| `0016_lock_down_login_attempt_rpc.sql` | Revokes the default PUBLIC `EXECUTE` grant on `record_login_attempt()` — a security-definer function is otherwise callable directly by the anon key regardless of table RLS |
 
 Every table has RLS enabled with public-read / admin-write policies. There is no
 `authenticated users can do everything` policy anywhere — writes require an

@@ -97,6 +97,7 @@ export function SiteFooter({
           {[
             { href: "/products", label: "Catalog" },
             { href: "/bulk-gifting", label: "Bulk gifting" },
+            { href: "/orders", label: "Track my orders" },
             { href: "/about", label: "About" },
             { href: "/contact", label: "Contact" },
           ].map((item) => (

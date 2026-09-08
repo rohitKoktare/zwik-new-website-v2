@@ -465,6 +465,26 @@ Never expose privileged credentials to client code.
 - Marketing consent is separate from ordering. Placing an order is consent to be
   contacted about that order and nothing more.
 
+**Phone sign-in (migration 0015) does not weaken any of the above.**
+`customer_sessions`, `otp_codes`, and `login_attempts` have RLS enabled with
+**no policies at all** — the same posture as `order_number_counters` — so
+neither the anon nor the authenticated Postgres role can read or write them
+under any circumstance. Every read and write goes through the service-role
+client in `lib/customer-auth/`, which is the trust boundary, exactly as it
+already is for `orders.public_token` (§5.1). RLS on `customers`/`orders`/
+`order_items` themselves is completely unchanged — this feature does not add
+a client-readable policy to any of them; a signed-in customer's order list is
+served by server code that already resolved their identity via the session
+cookie, not by Postgres enforcing it.
+
+**Real phone verification is deliberately deferred.** Entering a phone number
+that has orders on file signs you in directly today — no OTP is sent. This is
+a documented, temporary trade-off (see docs/DATABASE_DESIGN.md), not an
+oversight: real SMS OTP has an ongoing per-message cost and, for India, a DLT
+registration step outside this codebase. `lib/customer-auth/otp-provider.ts`
+is the single place this flips on once `OTP_PROVIDER` is set — nothing else
+about the flow needs to change when it does.
+
 ## 17. Observability
 
 Centralized logging should distinguish:

@@ -607,6 +607,56 @@ The period comes from `to_char(now() at time zone 'Asia/Kolkata', 'YYMM')` so
 the month rolls over at IST midnight. Using UTC would restart numbering 5½ hours
 late and put early-morning IST orders in the previous month.
 
+## 28. customer_sessions, otp_codes, login_attempts
+
+Added by migration 0015, so a customer can sign in with their phone number and
+see their own order history (`app/(store)/orders/page.tsx`), without a
+Supabase Auth identity — this is a bespoke session, not tied to `auth.users`.
+
+**`customer_sessions`** — one row per active sign-in.
+- `customer_id` references `customers`, `on delete cascade`
+- `token_hash` — sha256 of the cookie's random token, **never the raw token**.
+  Same reason a password is never stored in the clear: a leak of this table
+  alone hands out nothing usable.
+- `expires_at` — 30 days from creation.
+
+**`otp_codes`** — unused until `OTP_PROVIDER` is set (see below); created now
+so turning real verification on later is an env var and a vendor account, not
+a second migration.
+- `customer_id` references `customers`, `on delete cascade`
+- `code_hash` — sha256 of the 6-digit code, 5-minute expiry, `attempt_count`
+  capped at 5 before the code is rejected outright.
+
+**`login_attempts`** — one row per IP hash, a sliding-window throttle checked
+before every sign-in attempt (both requesting and verifying). `record_login_attempt()`
+does the same insert-on-conflict-returning as `next_order_number()`, applied to
+a time window instead of a monthly counter, so concurrent requests from one
+source can't all read a stale count. Its `EXECUTE` grant is revoked from
+`anon`/`authenticated`/`public` (migration 0016) — a security-definer function
+is otherwise callable directly by anyone holding the anon key regardless of
+the table's own RLS, which would let someone pre-fill a specific, known IP's
+bucket to grief that person's real sign-in attempts.
+
+All three: RLS **enabled with no policies at all**, the same posture as
+`order_number_counters` — neither the anon nor the authenticated Postgres role
+can reach them under any circumstance. Every read and write goes through the
+service-role client in `lib/customer-auth/`.
+
+**Why there's no OTP yet.** Real SMS verification has an ongoing per-message
+cost and, for India, requires DLT sender-ID/template registration with the
+telecom regulator — a business/compliance step outside this codebase, not
+something code alone resolves. Until `OTP_PROVIDER` is set,
+`lib/customer-auth/otp-provider.ts`'s `isOtpEnabled()` is false and
+`requestLoginAction` signs a matching phone straight in. This is a deliberate,
+temporary trade-off, not an oversight: **whoever types a phone number that has
+orders on file can see that phone's order history** (order number, date,
+status, items, totals — not the customer's name, which the reused
+`/orders/[token]` page already excludes). `login_attempts` bounds *bulk*
+scanning of the phone-number space; it cannot stop a *targeted* lookup of one
+already-known number. The exit path is one env var: set `OTP_PROVIDER` plus
+that vendor's secrets, and the exact same code path requires a real code
+before signing anyone in.
+
 ## 21. Future Extensions
 
 Potential future tables, only when required:

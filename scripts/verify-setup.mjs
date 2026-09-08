@@ -32,6 +32,9 @@ const PENDING_MIGRATION_TABLES = [
   { table: "message_campaigns", migration: "0013_message_campaigns.sql" },
   { table: "campaign_recipients", migration: "0013_message_campaigns.sql" },
   { table: "order_number_counters", migration: "0014_order_numbers_and_tracking.sql" },
+  { table: "customer_sessions", migration: "0015_customer_login_sessions.sql" },
+  { table: "otp_codes", migration: "0015_customer_login_sessions.sql" },
+  { table: "login_attempts", migration: "0015_customer_login_sessions.sql" },
 ];
 
 /**
@@ -49,6 +52,9 @@ const PRIVATE_TABLES = [
   "message_campaigns",
   "campaign_recipients",
   "order_number_counters",
+  "customer_sessions",
+  "otp_codes",
+  "login_attempts",
 ];
 
 /** Columns added by a migration, checked the same way. */
