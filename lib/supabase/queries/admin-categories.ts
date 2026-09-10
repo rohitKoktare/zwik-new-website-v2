@@ -21,11 +21,13 @@ export type AdminCategory = {
   isActive: boolean;
   sortOrder: number;
   /**
-   * Products pointing at this category, both active and hidden.
+   * Products assigned to this category via `product_categories`, both active
+   * and hidden — a product may be counted under several categories at once.
    *
-   * products.category_id is `on delete restrict`, so this is not decoration:
-   * a non-zero count means Postgres will refuse the delete. Counting hidden
-   * products too is deliberate — a hidden product still holds the FK.
+   * `product_categories.category_id` is `on delete restrict`, so this is not
+   * decoration: a non-zero count means Postgres will refuse the delete.
+   * Counting hidden products too is deliberate — a hidden product still holds
+   * the join row.
    */
   productCount: number;
   /** Of `productCount`, how many are visible on the storefront. */
@@ -58,18 +60,28 @@ type CategoryRow = {
   created_at: string;
   updated_at: string;
   /**
-   * Embedded products, selected only for their is_active flag so the counts
-   * can be derived. Deliberately not `count` aggregate syntax: that cannot
-   * also give the active/hidden split in one round trip.
+   * Embedded through product_categories (not a direct products(...) embed —
+   * that relied on the single products.category_id FK, gone since migration
+   * 0018), selected only for is_active so the counts can be derived.
+   * Deliberately not `count` aggregate syntax: that cannot also give the
+   * active/hidden split in one round trip.
    */
-  products: { is_active: boolean }[] | null;
+  product_categories: { product: { is_active: boolean } | { is_active: boolean }[] | null }[] | null;
 };
 
 const CATEGORY_SELECT =
-  "id, name, slug, description, is_active, sort_order, created_at, updated_at, products(is_active)";
+  "id, name, slug, description, is_active, sort_order, created_at, updated_at, product_categories(product:products(is_active))";
+
+/** PostgREST embeds a to-one relation as an object or a single-item array. */
+function firstOrNull<T>(value: T | T[] | null): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value;
+}
 
 function toAdminCategory(row: CategoryRow): AdminCategory {
-  const products = row.products ?? [];
+  const products = (row.product_categories ?? [])
+    .map((link) => firstOrNull(link.product))
+    .filter((product): product is { is_active: boolean } => product !== null);
 
   return {
     id: row.id,

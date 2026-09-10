@@ -230,7 +230,9 @@ export default async function AdminProductsPage({
                     {product.sku ?? <span className="text-muted-foreground">None</span>}
                   </TableCell>
                   <TableCell>
-                    {product.categoryName ?? (
+                    {product.categoryNames.length > 0 ? (
+                      product.categoryNames.join(", ")
+                    ) : (
                       <span className="text-muted-foreground">Uncategorised</span>
                     )}
                   </TableCell>

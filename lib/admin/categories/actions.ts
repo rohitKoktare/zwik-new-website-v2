@@ -36,8 +36,8 @@ import {
  *   7. Return a safe, human-readable result
  *
  * Categories are structural rather than purely editorial: a category's slug is
- * the public `?place=` filter on /products, and products.category_id is
- * `on delete restrict`. So while any admin role may create and edit them,
+ * the public `?place=` filter on /products, and product_categories.category_id
+ * is `on delete restrict`. So while any admin role may create and edit them,
  * permanent deletion is gated behind DESTRUCTIVE_ROLES — consistent with how
  * the rest of the admin treats destroy-vs-archive.
  *
@@ -383,11 +383,11 @@ export async function restoreCategoryAction(
 /**
  * Permanent delete, allowed only for a category no product points at.
  *
- * products.category_id is `on delete restrict`, so Postgres is the real
- * guarantee here — the pre-check exists to produce a useful message instead of
- * a foreign-key error, and to avoid attempting a write that cannot succeed.
- * The FK is still relied on for the race where a product is assigned between
- * the check and the delete.
+ * product_categories.category_id is `on delete restrict`, so Postgres is the
+ * real guarantee here — the pre-check exists to produce a useful message
+ * instead of a foreign-key error, and to avoid attempting a write that cannot
+ * succeed. The FK is still relied on for the race where a product is
+ * assigned between the check and the delete.
  */
 export async function deleteCategoryAction(
   _prev: ActionResult,

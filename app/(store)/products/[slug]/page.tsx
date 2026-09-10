@@ -59,7 +59,6 @@ export default async function ProductPage({
   if (!product) notFound();
 
   const related = await getRelatedProducts(slug, 4);
-  const accent = getCategoryAccent(product.categorySlug);
   const delivery = getDeliveryTerms(settings);
 
   return (
@@ -69,7 +68,8 @@ export default async function ProductPage({
           ← Catalog
         </Link>
         <span>
-          / {product.categoryName} / {product.sku}
+          / {product.categories.map((c) => c.name).join(", ") || "Uncategorised"} /{" "}
+          {product.sku}
         </span>
       </div>
 
@@ -82,12 +82,22 @@ export default async function ProductPage({
 
         <div className="flex flex-col gap-6.5 px-6 py-10 md:px-12 md:pb-12">
           <div>
-            <div
-              className="inline-block px-2.5 py-1.5 font-mono text-[11px] tracking-[1.6px] uppercase"
-              style={{ background: accent.bg, color: accent.fg }}
-            >
-              {product.categoryName}
-            </div>
+            {product.categories.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {product.categories.map((category) => {
+                  const categoryAccent = getCategoryAccent(category.slug);
+                  return (
+                    <span
+                      key={category.slug}
+                      className="inline-block px-2.5 py-1.5 font-mono text-[11px] tracking-[1.6px] uppercase"
+                      style={{ background: categoryAccent.bg, color: categoryAccent.fg }}
+                    >
+                      {category.name}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             <h1 className="mt-4.5 text-[clamp(34px,4vw,58px)] leading-[0.95] font-semibold tracking-[-0.035em]">
               {product.name}
             </h1>
@@ -162,8 +172,7 @@ export default async function ProductPage({
                   sku: p.sku,
                   name: p.name,
                   slug: p.slug,
-                  categorySlug: p.categorySlug,
-                  categoryName: p.categoryName,
+                  categories: p.categories,
                   price: p.price,
                   images: p.images,
                 }}

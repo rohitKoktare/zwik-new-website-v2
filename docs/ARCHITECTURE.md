@@ -335,7 +335,8 @@ Product:
 - short_description
 - description
 - features
-- category_id
+- categories — many-to-many via `product_categories` (DATABASE_DESIGN.md §7a),
+  not a column on this table; a product may belong to several at once
 - price
 - original_price
 - currency

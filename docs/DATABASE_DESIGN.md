@@ -80,7 +80,6 @@ Recommended fields:
 - short_description TEXT
 - description TEXT
 - features JSONB or TEXT[] depending on implementation
-- category_id UUID nullable/required based on business rule
 - price NUMERIC(12,2)
 - original_price NUMERIC(12,2)
 - currency TEXT
@@ -113,11 +112,17 @@ of this design assumed an Amazon-redirect model; that is no longer current. The
 columns stay so the channel can be re-enabled without a migration, but no UI
 reads them and no validation should require them.
 
+**A product's categories are not a column on this table.** Migration 0003's
+original single nullable `category_id` was replaced in migration 0018 by the
+`product_categories` join table (§7a) — a product may belong to more than one
+category (e.g. a dashboard-cat miniature assigned to both Monitor and Table
+decor), the same way a product's images and video live in `product_assets`
+(§7) rather than a column here.
+
 Indexes:
 - slug
 - active + sort_order
 - featured + active
-- category_id + active
 - SKU
 - ASIN
 
@@ -184,6 +189,57 @@ meaning an archived asset stayed visible through this join table as long as
 its product was still active, even though `assets_public_read` correctly
 hides that same asset from a direct `assets` query. Migration 0017 tightened
 the policy to require both: `p.is_active = true and a.status = 'active'`.
+
+## 7a. product_categories
+
+Join table between products and categories. Added by migration 0018,
+replacing the original single nullable `products.category_id` (migration
+0003) so a product can belong to more than one category at once — e.g. a
+dashboard-cat miniature assigned to both Monitor and Table decor, so it shows
+up browsing either. Structured identically to `product_assets` above.
+
+Fields:
+- product_id UUID
+- category_id UUID
+- created_at TIMESTAMPTZ
+
+Primary key:
+- `(product_id, category_id)`
+
+Indexes:
+- product_id
+- category_id
+
+Foreign keys:
+- product_id → products.id, `on delete cascade` (deleting a product drops its
+  category assignments with it — nothing else references this join row)
+- category_id → categories.id, `on delete restrict` (unchanged from the old
+  `products.category_id` FK's semantics: a category with any product still
+  assigned to it cannot be deleted — see `lib/admin/categories/actions.ts`'s
+  `deleteCategoryAction` for the app-layer pre-check built on top of this)
+
+`product_categories_public_read` requires **both** sides active — the product
+and the category — mirroring the exact tightening 0017 made to
+`product_assets_public_read` and for the identical reason: an archived
+category shouldn't keep showing through a product's badge just because the
+product itself is still live.
+
+**This does not gate general catalogue visibility.** A product's appearance in
+the unfiltered `/products` catalogue is governed by `products.is_active` alone
+— `lib/supabase/queries/products.ts`'s `getActiveProducts()` fetches
+`product_categories` as a plain (non-`!inner`) embed purely for display, never
+as a condition on which products are returned. This is deliberate: the old
+single-FK version *did* inner-join through categories, which is exactly why a
+category was required at all ("an uncategorised product would silently never
+appear on the public site" — see the removed comment this replaced in
+`lib/validation/product.ts`). Making the join optional-for-display rather than
+required-for-existence means archiving a category can never silently remove a
+product from the general catalogue, even if every category it was assigned to
+becomes inactive. Category-*scoped* browsing (`?place=<slug>`) is a separate,
+deliberate filter, implemented as a bounded lookup against this table (the
+same "one extra query rather than a filtered embed" trade-off already made in
+`lib/supabase/queries/admin-products.ts`'s `listAdminProducts`), not by
+changing what counts as "in the catalogue" at all.
 
 ## 8. reviews
 

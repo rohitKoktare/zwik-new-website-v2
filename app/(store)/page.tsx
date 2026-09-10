@@ -24,7 +24,10 @@ export default async function HomePage() {
   const tiles: CategoryTile[] = categories.map((category) => ({
     slug: category.slug,
     name: category.name,
-    count: products.filter((p) => p.categorySlug === category.slug).length,
+    // A product can belong to more than one category, so it should count
+    // toward every tile it's assigned to — `.some(...)`, not an equality
+    // check against a single category.
+    count: products.filter((p) => p.categories.some((c) => c.slug === category.slug)).length,
   }));
 
   const waGiftLink =

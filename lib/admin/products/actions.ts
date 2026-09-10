@@ -88,7 +88,6 @@ function toProductRow(input: ProductInput) {
     short_description: input.shortDescription ?? null,
     description: input.description ?? null,
     features: input.specs,
-    category_id: input.categoryId,
     price: input.price,
     original_price: input.originalPrice ?? null,
     currency: input.currency,
@@ -102,6 +101,7 @@ function toProductRow(input: ProductInput) {
 function toAuditRecord(
   input: ProductInput,
   assetIds: string[],
+  categoryIds: string[],
 ): Record<string, unknown> {
   return {
     name: input.name,
@@ -110,7 +110,7 @@ function toAuditRecord(
     shortDescription: input.shortDescription ?? null,
     description: input.description ?? null,
     specs: input.specs,
-    categoryId: input.categoryId,
+    categoryIds,
     price: input.price,
     originalPrice: input.originalPrice ?? null,
     currency: input.currency,
@@ -199,6 +199,55 @@ async function syncProductAssets(
   return true;
 }
 
+/**
+ * Replaces a product's category assignments. Same delete-then-insert shape as
+ * syncProductAssets, for the same reason: `product_categories` is keyed on
+ * (product_id, category_id), so a full replace is simpler and more predictable
+ * than reconciling individual rows — and there's no per-row ordering or role
+ * to preserve here the way the gallery has.
+ *
+ * Unlike a failed gallery write, a product left with zero categories is worse
+ * than cosmetic: the storefront catalogue joins through this table, so it
+ * would silently stop appearing anywhere on the public site. Still reported
+ * back rather than rolled back — Supabase gives no client-side transaction,
+ * and the product row itself already committed by the time this runs.
+ */
+async function syncProductCategories(
+  supabase: SupabaseServerClient,
+  productId: string,
+  categoryIds: string[],
+): Promise<boolean> {
+  const { error: deleteError } = await supabase
+    .from("product_categories")
+    .delete()
+    .eq("product_id", productId);
+
+  if (deleteError) {
+    logger.error("syncProductCategories delete failed", {
+      productId,
+      error: deleteError.message,
+    });
+    return false;
+  }
+
+  if (categoryIds.length === 0) return true;
+
+  const { error: insertError } = await supabase.from("product_categories").insert(
+    categoryIds.map((categoryId) => ({ product_id: productId, category_id: categoryId })),
+  );
+
+  if (insertError) {
+    logger.error("syncProductCategories insert failed", {
+      productId,
+      count: categoryIds.length,
+      error: insertError.message,
+    });
+    return false;
+  }
+
+  return true;
+}
+
 export async function createProductAction(
   _prev: ActionResult,
   formData: FormData,
@@ -236,11 +285,16 @@ export async function createProductAction(
 
   const productId = (data as { id: string }).id;
   const galleryOk = await syncProductAssets(supabase, productId, input.assetIds, input.videoAssetId);
+  const categoriesOk = await syncProductCategories(supabase, productId, input.categoryIds);
 
   // 5. Audit.
   const { before, after } = diffRecords(
     null,
-    toAuditRecord(input, galleryOk ? input.assetIds : []),
+    toAuditRecord(
+      input,
+      galleryOk ? input.assetIds : [],
+      categoriesOk ? input.categoryIds : [],
+    ),
   );
 
   await recordAuditEvent({
@@ -250,7 +304,10 @@ export async function createProductAction(
     entityId: productId,
     before,
     after,
-    metadata: galleryOk ? null : { galleryWriteFailed: true },
+    metadata:
+      galleryOk && categoriesOk
+        ? null
+        : { galleryWriteFailed: !galleryOk, categoriesWriteFailed: !categoriesOk },
   });
 
   // 6. Revalidate the public pages this product appears on.
@@ -259,11 +316,10 @@ export async function createProductAction(
 
   // 7. Continue on the edit screen, so the admin keeps working on the row they
   //    just created instead of re-submitting the create form.
-  redirect(
-    galleryOk
-      ? `${ADMIN_LIST_PATH}/${productId}?created=1`
-      : `${ADMIN_LIST_PATH}/${productId}?created=1&mediaError=1`,
-  );
+  const params = new URLSearchParams({ created: "1" });
+  if (!galleryOk) params.set("mediaError", "1");
+  if (!categoriesOk) params.set("categoryError", "1");
+  redirect(`${ADMIN_LIST_PATH}/${productId}?${params.toString()}`);
 }
 
 export async function updateProductAction(
@@ -305,11 +361,16 @@ export async function updateProductAction(
   }
 
   const galleryOk = await syncProductAssets(supabase, id, input.assetIds, input.videoAssetId);
+  const categoriesOk = await syncProductCategories(supabase, id, input.categoryIds);
 
   // 5. Audit — only the fields that actually changed.
   const { before: beforeDiff, after: afterDiff } = diffRecords(
     toProductAuditRecord(before),
-    toAuditRecord(input, galleryOk ? input.assetIds : before.assetIds),
+    toAuditRecord(
+      input,
+      galleryOk ? input.assetIds : before.assetIds,
+      categoriesOk ? input.categoryIds : before.categoryIds,
+    ),
   );
 
   await recordAuditEvent({
@@ -319,7 +380,10 @@ export async function updateProductAction(
     entityId: id,
     before: beforeDiff,
     after: afterDiff,
-    metadata: galleryOk ? null : { galleryWriteFailed: true },
+    metadata:
+      galleryOk && categoriesOk
+        ? null
+        : { galleryWriteFailed: !galleryOk, categoriesWriteFailed: !categoriesOk },
   });
 
   // 6. Revalidate. A renamed slug means the old URL has to be refreshed too,
@@ -330,6 +394,16 @@ export async function updateProductAction(
   revalidateAdmin(`${ADMIN_LIST_PATH}/${id}`);
 
   // 7. Result.
+  if (!galleryOk && !categoriesOk) {
+    return actionError(
+      "The product details were saved, but the gallery and categories could not be updated. Please set them again.",
+    );
+  }
+  if (!categoriesOk) {
+    return actionError(
+      "The product details were saved, but its categories could not be updated — it may now be invisible on the public site. Please choose its categories again.",
+    );
+  }
   if (!galleryOk) {
     return actionError(
       "The product details were saved, but the image gallery could not be updated. Please set the images again.",

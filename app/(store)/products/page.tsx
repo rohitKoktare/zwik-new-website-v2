@@ -26,7 +26,7 @@ export default async function ProductsPage({
    */
   const categories = await getActiveCategories();
   const activeCategory = categories.find((c) => c.slug === place);
-  const products = await getActiveProducts(activeCategory?.slug);
+  const products = await getActiveProducts(activeCategory?.id);
 
   return (
     <section className="py-14 md:py-16">
@@ -39,17 +39,19 @@ export default async function ProductsPage({
             {products.length === 1 ? "1 piece live" : `${products.length} pieces live`}
           </div>
         </div>
-        {activeCategory && (
-          <Link
-            href="/products"
-            className="border-b-2 border-[var(--magenta-60)] pb-1.5 font-mono text-xs tracking-[1.4px] text-[var(--gray-100)] uppercase"
-          >
-            Show everything
-          </Link>
-        )}
       </div>
 
       <nav className="mx-6 mb-8 flex flex-wrap gap-2 md:mx-12" aria-label="Filter by category">
+        <Link
+          href="/products"
+          className={`px-3.5 py-2 font-mono text-xs tracking-[1.2px] uppercase ${
+            activeCategory
+              ? "border border-[var(--gray-20)] text-[var(--text-secondary)] hover:border-[var(--gray-100)]"
+              : "bg-[var(--gray-100)] text-white"
+          }`}
+        >
+          All
+        </Link>
         {categories.map((category) => (
           <Link
             key={category.slug}

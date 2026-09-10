@@ -4,12 +4,26 @@ import { logger } from "@/lib/logger";
 import { resolveAssetUrl } from "@/lib/storage/resolve-asset-url";
 import type { Product, ProductImage, ProductSpec } from "@/types/product";
 
+/**
+ * No `!inner` through categories any more (contrast the old single-FK version
+ * of this file). A product's categories now live in the `product_categories`
+ * join table (migration 0018) and are fetched purely for display — a product
+ * with zero *active* categories (all archived after assignment) still shows
+ * up here with an empty `categories` array rather than disappearing from the
+ * catalogue entirely. Category-scoped browsing (`?place=<slug>`) is a
+ * separate, deliberate filter — see `getActiveProducts`'s `categoryId` param.
+ */
 const PRODUCT_SELECT = `
   id, sku, name, slug, short_description, description, features,
   price, original_price, currency, amazon_url, is_featured, is_active, sort_order,
-  category:categories!inner(name, slug),
+  product_categories(category:categories(name, slug, sort_order)),
   product_assets(role, sort_order, asset:assets(storage_path, alt_text, media_type))
 `;
+
+type EmbeddedCategory =
+  | { name: string; slug: string; sort_order: number }
+  | { name: string; slug: string; sort_order: number }[]
+  | null;
 
 /**
  * Shape of a row returned by PRODUCT_SELECT. Supabase's client isn't wired to
@@ -32,7 +46,7 @@ type ProductRow = {
   is_featured: boolean;
   is_active: boolean;
   sort_order: number;
-  category: { name: string; slug: string } | { name: string; slug: string }[];
+  product_categories: { category: EmbeddedCategory }[];
   product_assets: {
     role: string;
     sort_order: number;
@@ -44,8 +58,22 @@ type ProductRow = {
   }[];
 };
 
+/** PostgREST embeds a to-one relation as an object or a single-item array. */
+function firstOrNull<T>(value: T | T[] | null): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value;
+}
+
 function toProduct(row: ProductRow): Product {
-  const category = Array.isArray(row.category) ? row.category[0] : row.category;
+  const categories = row.product_categories
+    .map((link) => firstOrNull(link.category))
+    .filter((category): category is { name: string; slug: string; sort_order: number } => category !== null)
+    // Deterministic order: the same order categories appear in everywhere
+    // else on the site (footer, homepage tiles, catalog filter chips), so
+    // the card badge/PDP breadcrumb picks a stable "first" category rather
+    // than whatever order Postgres happened to return the join rows in.
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((category) => ({ slug: category.slug, name: category.name }));
 
   const attached = [...row.product_assets]
     .filter((pa) => pa.asset)
@@ -80,8 +108,7 @@ function toProduct(row: ProductRow): Product {
     shortDescription: row.short_description,
     description: row.description,
     specs: row.features ?? [],
-    categorySlug: category?.slug ?? "",
-    categoryName: category?.name ?? "",
+    categories,
     price: Number(row.price),
     originalPrice: row.original_price !== null ? Number(row.original_price) : null,
     currency: row.currency,
@@ -94,22 +121,51 @@ function toProduct(row: ProductRow): Product {
   };
 }
 
-export async function getActiveProducts(categorySlug?: string): Promise<Product[]> {
+/**
+ * @param categoryId Filters to products assigned to this category. Takes the
+ * id, not the slug — the one caller (`app/(store)/products/page.tsx`) already
+ * resolves and validates the slug against the active category list before
+ * calling this, so it has the id in hand; resolving it a second time in here
+ * would be a redundant query.
+ *
+ * Implemented as a separate bounded lookup against `product_categories`
+ * rather than an `!inner` embed + dotted filter, the same trade-off already
+ * made in `lib/supabase/queries/admin-products.ts`'s `listAdminProducts`: a
+ * filtered embed would also filter the *returned* category list down to just
+ * the matched one, breaking any product's own display of its other
+ * categories.
+ */
+export async function getActiveProducts(categoryId?: string): Promise<Product[]> {
   if (!isSupabaseConfigured) {
     logger.debug("getActiveProducts skipped: Supabase not configured");
     return [];
   }
 
   const supabase = createPublicClient();
+
+  let productIds: string[] | null = null;
+  if (categoryId) {
+    const { data: matches, error: matchError } = await supabase
+      .from("product_categories")
+      .select("product_id")
+      .eq("category_id", categoryId);
+
+    if (matchError) {
+      logger.error("getActiveProducts category lookup failed", { error: matchError.message });
+      return [];
+    }
+
+    productIds = (matches ?? []).map((row) => row.product_id);
+    if (productIds.length === 0) return [];
+  }
+
   let query = supabase
     .from("products")
     .select(PRODUCT_SELECT)
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
 
-  if (categorySlug) {
-    query = query.eq("category.slug", categorySlug);
-  }
+  if (productIds) query = query.in("id", productIds);
 
   const { data, error } = await query;
 

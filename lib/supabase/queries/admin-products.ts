@@ -19,7 +19,7 @@ export type AdminProductListItem = {
   name: string;
   slug: string;
   sku: string | null;
-  categoryName: string | null;
+  categoryNames: string[];
   price: number;
   currency: string;
   isFeatured: boolean;
@@ -37,8 +37,8 @@ export type AdminProduct = {
   specs: ProductSpec[];
   /** Specs rendered as the "Label: Value" lines the form edits. */
   specsText: string;
-  categoryId: string | null;
-  categoryName: string | null;
+  categoryIds: string[];
+  categoryNames: string[];
   price: number;
   originalPrice: number | null;
   currency: string;
@@ -54,6 +54,10 @@ export type AdminProduct = {
 
 type EmbeddedCategory = { id: string; name: string } | { id: string; name: string }[] | null;
 
+/** One product_categories row as PostgREST embeds it — the join row itself,
+ * carrying the nested category. */
+type ProductCategoryLink = { category: EmbeddedCategory };
+
 type ProductListRow = {
   id: string;
   name: string;
@@ -64,7 +68,7 @@ type ProductListRow = {
   is_featured: boolean;
   is_active: boolean;
   sort_order: number;
-  category: EmbeddedCategory;
+  product_categories: ProductCategoryLink[] | null;
 };
 
 type ProductDetailRow = {
@@ -75,7 +79,6 @@ type ProductDetailRow = {
   short_description: string | null;
   description: string | null;
   features: unknown;
-  category_id: string | null;
   price: number | string;
   original_price: number | string | null;
   currency: string;
@@ -83,19 +86,29 @@ type ProductDetailRow = {
   is_active: boolean;
   sort_order: number;
   updated_at: string | null;
-  category: EmbeddedCategory;
+  product_categories: ProductCategoryLink[] | null;
   product_assets: { asset_id: string; sort_order: number; role: string }[] | null;
 };
 
+// No `category_id` here any more — a product's categories live in the
+// `product_categories` join table (migration 0018), mirroring how the
+// gallery lives in `product_assets` rather than a column on `products`.
 const LIST_SELECT =
-  "id, name, slug, sku, price, currency, is_featured, is_active, sort_order, category:categories(id, name)";
+  "id, name, slug, sku, price, currency, is_featured, is_active, sort_order, product_categories(category:categories(id, name))";
 
 const DETAIL_SELECT =
-  "id, name, slug, sku, short_description, description, features, category_id, price, original_price, currency, is_featured, is_active, sort_order, updated_at, category:categories(id, name), product_assets(asset_id, sort_order, role)";
+  "id, name, slug, sku, short_description, description, features, price, original_price, currency, is_featured, is_active, sort_order, updated_at, product_categories(category:categories(id, name)), product_assets(asset_id, sort_order, role)";
 
 function firstCategory(category: EmbeddedCategory): { id: string; name: string } | null {
   if (!category) return null;
   return Array.isArray(category) ? (category[0] ?? null) : category;
+}
+
+/** A product's categories, in whatever order Postgres returned the join rows. */
+function categoriesFrom(links: ProductCategoryLink[] | null): { id: string; name: string }[] {
+  return (links ?? [])
+    .map((link) => firstCategory(link.category))
+    .filter((category): category is { id: string; name: string } => category !== null);
 }
 
 /**
@@ -140,6 +153,33 @@ export async function listAdminProducts(options: {
   if (!isSupabaseConfigured) return { products: [], totalCount: 0 };
 
   const supabase = await createClient();
+
+  /*
+   * Filtering by category is a separate, bounded lookup rather than a
+   * filtered embed on `product_categories` — an `!inner` embed plus a dotted
+   * `.eq()` filter would apply that same filter to the *returned* join rows
+   * too, so a product matching the filter would show only the one category
+   * it was found by, not its full assignment list. One extra query keeps the
+   * display embed simple and correct, the same trade-off already made for
+   * order/customer embeds in admin-orders.ts.
+   */
+  let categoryProductIds: string[] | null = null;
+
+  if (options.categoryId) {
+    const { data: matches, error: matchError } = await supabase
+      .from("product_categories")
+      .select("product_id")
+      .eq("category_id", options.categoryId);
+
+    if (matchError) {
+      logger.error("listAdminProducts category lookup failed", { error: matchError.message });
+      return { products: [], totalCount: 0 };
+    }
+
+    categoryProductIds = (matches ?? []).map((row) => row.product_id);
+    if (categoryProductIds.length === 0) return { products: [], totalCount: 0 };
+  }
+
   let query = supabase
     .from("products")
     .select(LIST_SELECT, { count: "exact" })
@@ -149,7 +189,7 @@ export async function listAdminProducts(options: {
 
   if (options.status === "active") query = query.eq("is_active", true);
   if (options.status === "archived") query = query.eq("is_active", false);
-  if (options.categoryId) query = query.eq("category_id", options.categoryId);
+  if (categoryProductIds) query = query.in("id", categoryProductIds);
 
   const search = options.search ? sanitizeSearchTerm(options.search) : "";
   if (search) {
@@ -168,7 +208,7 @@ export async function listAdminProducts(options: {
     name: row.name,
     slug: row.slug,
     sku: row.sku,
-    categoryName: firstCategory(row.category)?.name ?? null,
+    categoryNames: categoriesFrom(row.product_categories).map((c) => c.name),
     price: Number(row.price),
     currency: row.currency,
     isFeatured: row.is_featured,
@@ -198,6 +238,7 @@ export async function getAdminProductById(id: string): Promise<AdminProduct | nu
 
   const row = data as unknown as ProductDetailRow;
   const specs = toSpecs(row.features);
+  const categories = categoriesFrom(row.product_categories);
 
   // The video lives in the same join table under role 'video'. Keeping it out
   // of `assetIds` stops the gallery picker from re-saving it as an image.
@@ -214,8 +255,8 @@ export async function getAdminProductById(id: string): Promise<AdminProduct | nu
     description: row.description,
     specs,
     specsText: formatSpecsForTextarea(specs),
-    categoryId: row.category_id,
-    categoryName: firstCategory(row.category)?.name ?? null,
+    categoryIds: categories.map((c) => c.id),
+    categoryNames: categories.map((c) => c.name),
     price: Number(row.price),
     originalPrice: row.original_price === null ? null : Number(row.original_price),
     currency: row.currency,
@@ -240,7 +281,7 @@ export function toProductAuditRecord(product: AdminProduct): Record<string, unkn
     shortDescription: product.shortDescription,
     description: product.description,
     specs: product.specs,
-    categoryId: product.categoryId,
+    categoryIds: product.categoryIds,
     price: product.price,
     originalPrice: product.originalPrice,
     currency: product.currency,

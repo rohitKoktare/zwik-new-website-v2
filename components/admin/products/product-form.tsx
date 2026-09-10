@@ -42,17 +42,12 @@ type FormValues = {
   sku: string;
   shortDescription: string;
   description: string;
-  categoryId: string;
   price: string;
   originalPrice: string;
   currency: string;
   sortOrder: string;
   specs: string;
 };
-
-/** Native select, styled to match components/ui/input. */
-const SELECT_CLASS =
-  "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2 py-1 text-base transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30";
 
 function initialValues(product?: AdminProduct): FormValues {
   return {
@@ -61,7 +56,6 @@ function initialValues(product?: AdminProduct): FormValues {
     sku: product?.sku ?? "",
     shortDescription: product?.shortDescription ?? "",
     description: product?.description ?? "",
-    categoryId: product?.categoryId ?? "",
     price: product ? String(product.price) : "",
     originalPrice:
       product && product.originalPrice !== null ? String(product.originalPrice) : "",
@@ -92,6 +86,7 @@ export function ProductForm({
   );
 
   const [values, setValues] = useState<FormValues>(() => initialValues(product));
+  const [categoryIds, setCategoryIds] = useState<string[]>(product?.categoryIds ?? []);
   const [isFeatured, setIsFeatured] = useState(product?.isFeatured ?? false);
   const [isActive, setIsActive] = useState(product?.isActive ?? true);
   // An existing product already has a slug that public URLs point at, so it is
@@ -112,12 +107,21 @@ export function ProductForm({
     }));
   }
 
-  // The stored category may since have been deactivated; keep it selectable so
-  // saving an unrelated field cannot silently move the product elsewhere.
-  const missingCategory =
-    product?.categoryId && !categories.some((category) => category.id === product.categoryId)
-      ? { id: product.categoryId, name: product.categoryName ?? "Current category" }
-      : null;
+  function toggleCategory(categoryId: string) {
+    setCategoryIds((current) =>
+      current.includes(categoryId)
+        ? current.filter((id) => id !== categoryId)
+        : [...current, categoryId],
+    );
+  }
+
+  // A previously-assigned category may since have been deactivated; keep it
+  // checkable so saving unrelated fields cannot silently drop the product
+  // from a category an admin never touched. categoryIds/categoryNames come
+  // from the same mapped array in admin-products.ts, so they line up by index.
+  const missingCategories = (product?.categoryIds ?? [])
+    .map((id, index) => ({ id, name: product?.categoryNames[index] ?? "Current category" }))
+    .filter((missing) => !categories.some((category) => category.id === missing.id));
 
   return (
     <form action={formAction} className="mt-6 grid max-w-3xl gap-6">
@@ -196,38 +200,58 @@ export function ProductForm({
           />
         </FormField>
 
-        <FormField name="categoryId" label="Category" errors={errors?.categoryId} required>
-          {/* A native select posts reliably in FormData; the Base UI Select is
-              built for controlled client state, which this form does not need. */}
-          <select
-            id="categoryId"
-            name="categoryId"
-            className={SELECT_CLASS}
-            value={values.categoryId}
-            onChange={(event) => setField("categoryId", event.target.value)}
-            required
-            aria-invalid={Boolean(errors?.categoryId)}
+        <FormField
+          name="categoryIds"
+          label="Categories"
+          hint="A product can belong to more than one — e.g. a dashboard cat miniature assigned to both Monitor and Table decor."
+          errors={errors?.categoryIds}
+          required
+        >
+          {/* Native checkboxes with a shared name post reliably as a repeated
+              FormData key — the same multi-value shape parseForm already
+              collapses into an array for assetIds. */}
+          <div
+            role="group"
+            aria-label="Categories"
+            className="grid gap-2 border border-input p-3"
           >
-            <option value="">Choose a category…</option>
-            {missingCategory && (
-              <option value={missingCategory.id}>{missingCategory.name} (hidden)</option>
-            )}
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
+            {missingCategories.map((missing) => (
+              <label key={missing.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="categoryIds"
+                  value={missing.id}
+                  checked={categoryIds.includes(missing.id)}
+                  onChange={() => toggleCategory(missing.id)}
+                  className="size-4"
+                />
+                {missing.name} (hidden)
+              </label>
             ))}
-          </select>
+            {categories.map((category) => (
+              <label key={category.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="categoryIds"
+                  value={category.id}
+                  checked={categoryIds.includes(category.id)}
+                  onChange={() => toggleCategory(category.id)}
+                  className="size-4"
+                />
+                {category.name}
+              </label>
+            ))}
+          </div>
         </FormField>
 
-        {categories.length === 0 && !missingCategory && (
+        {categories.length === 0 && missingCategories.length === 0 && (
           <div
             role="alert"
             className="grid gap-2 border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
           >
             <p>
               There are no active categories yet. Add one before creating products — a
-              product without a category never appears on the public site.
+              product with no categories never appears on the public site.
             </p>
             <div>
               {/* Base UI composes via `render`, not Radix's `asChild`. */}

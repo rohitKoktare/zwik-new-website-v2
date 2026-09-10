@@ -20,6 +20,8 @@ const MAX_MONEY = 9_999_999_999.99;
 
 /** Most images one product may carry in its gallery. */
 export const MAX_GALLERY_ASSETS = 24;
+/** Comfortably above the handful of categories this store actually has. */
+export const MAX_CATEGORIES_PER_PRODUCT = 20;
 
 /** Most "Label: Value" lines accepted in the specifications textarea. */
 export const MAX_SPECS = 40;
@@ -193,12 +195,31 @@ export const productInputSchema = z.object({
   description: emptyToUndefined(
     z.string().trim().max(5000, "Description is too long (5,000 characters maximum)."),
   ),
-  // Required even though the column is nullable: the storefront catalogue query
-  // inner-joins categories, so an uncategorised product would silently never
-  // appear on the public site.
-  categoryId: z.preprocess(
-    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
-    z.string({ message: "Choose a category." }).uuid("Choose a category."),
+  // At least one required: the storefront catalogue query joins through
+  // product_categories, so a product assigned to none would silently never
+  // appear on the public site. Same shape as assetIds — one form field per
+  // ticked checkbox, collapsed and deduped the same way (product_categories
+  // is keyed on (product_id, category_id)).
+  categoryIds: z.preprocess(
+    (value) => {
+      if (value === undefined || value === null) return [];
+
+      const entries = Array.isArray(value) ? value : [value];
+      const unique: string[] = [];
+
+      for (const entry of entries) {
+        if (typeof entry !== "string") continue;
+        const trimmed = entry.trim();
+        if (trimmed === "" || unique.includes(trimmed)) continue;
+        unique.push(trimmed);
+      }
+
+      return unique;
+    },
+    z
+      .array(uuidSchema)
+      .min(1, "Choose at least one category.")
+      .max(MAX_CATEGORIES_PER_PRODUCT, `Choose at most ${MAX_CATEGORIES_PER_PRODUCT} categories.`),
   ),
   price: priceSchema,
   originalPrice: originalPriceSchema,

@@ -53,6 +53,7 @@ export default async function EditProductPage({
 
   const justCreated = firstParam(query.created) === "1";
   const mediaFailed = firstParam(query.mediaError) === "1";
+  const categoryFailed = firstParam(query.categoryError) === "1";
 
   return (
     <>
@@ -116,7 +117,7 @@ export default async function EditProductPage({
         }
       />
 
-      {justCreated && !mediaFailed && (
+      {justCreated && !mediaFailed && !categoryFailed && (
         <p role="status" className="mt-4 border border-border bg-muted px-3 py-2 text-sm">
           Product created. You can keep editing it here.
         </p>
@@ -129,6 +130,16 @@ export default async function EditProductPage({
         >
           The product was created, but its images could not be attached. Please select the
           gallery images again and save.
+        </p>
+      )}
+
+      {categoryFailed && (
+        <p
+          role="alert"
+          className="mt-4 border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+        >
+          The product was created, but its categories could not be saved — it may not appear
+          on the public site yet. Please choose its categories again.
         </p>
       )}
 

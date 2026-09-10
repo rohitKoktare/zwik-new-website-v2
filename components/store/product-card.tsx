@@ -21,7 +21,11 @@ import type { ProductSummary } from "@/types/product";
  */
 export function ProductCard({ product }: { product: ProductSummary }) {
   const { addToCart } = useCart();
-  const accent = getCategoryAccent(product.categorySlug);
+  // A product can belong to several categories; the card has room for one
+  // badge, so it leads with the first (product.categories is pre-sorted by
+  // each category's own display order — see lib/supabase/queries/products.ts).
+  const primaryCategory = product.categories[0];
+  const accent = getCategoryAccent(primaryCategory?.slug ?? "");
   const image = product.images[0];
 
   return (
@@ -44,12 +48,14 @@ export function ProductCard({ product }: { product: ProductSummary }) {
               className="object-cover transition-transform duration-[240ms] ease-[var(--easing-standard)] group-hover:scale-[1.06]"
             />
           )}
-          <div
-            className="absolute top-0 left-0 px-2.5 py-1 font-mono text-[10px] tracking-[1.4px] uppercase"
-            style={{ background: accent.bg, color: accent.fg }}
-          >
-            {product.categoryName}
-          </div>
+          {primaryCategory && (
+            <div
+              className="absolute top-0 left-0 px-2.5 py-1 font-mono text-[10px] tracking-[1.4px] uppercase"
+              style={{ background: accent.bg, color: accent.fg }}
+            >
+              {primaryCategory.name}
+            </div>
+          )}
         </div>
         <div className="p-4">
           <div className="flex min-h-[46px] items-start justify-between gap-3">
