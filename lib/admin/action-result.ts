@@ -51,11 +51,11 @@ export function parseForm<T extends z.ZodType>(
   const raw: Record<string, unknown> = {};
 
   for (const [key, value] of formData.entries()) {
-    if (value instanceof File) {
-      raw[key] = value;
-      continue;
-    }
-    // Collapse repeated field names (multi-selects) into an array.
+    // Collapse repeated field names (multi-selects, multi-file uploads) into
+    // an array. A File collapses the same way a string does — an earlier
+    // version of this function special-cased File to always overwrite the
+    // previous value, which silently dropped every file but the last one out
+    // of a multi-file <input>.
     const existing = raw[key];
     if (existing === undefined) {
       raw[key] = value;

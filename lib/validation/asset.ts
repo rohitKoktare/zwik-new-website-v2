@@ -149,22 +149,54 @@ export function matchesDeclaredSignature(
  * because they need the file's bytes; this covers everything decidable from
  * the submitted values alone.
  */
+/** Uploading many at once is still one admin action, not a background job. */
+export const MAX_BATCH_UPLOAD_FILES = 20;
+
+const uploadFileSchema = z
+  .instanceof(File, { message: "Choose a file to upload." })
+  .refine((file) => file.size > 0, "Choose a file to upload — that one is empty.")
+  .refine(
+    (file) => file.size <= MAX_UPLOAD_BYTES,
+    `Files must be ${MAX_UPLOAD_LABEL} or smaller.`,
+  );
+
+/** Always normalises to an array, so a lone selection (a bare value, not
+ * wrapped by parseForm) and no selection at all (the key omitted) both come
+ * out the same shape as two-or-more. */
+function toArray(value: unknown): unknown[] {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
 export const assetUploadSchema = z.object({
-  file: z
-    .instanceof(File, { message: "Choose a file to upload." })
-    .refine((file) => file.size > 0, "Choose a file to upload — that one is empty.")
-    .refine(
-      (file) => file.size <= MAX_UPLOAD_BYTES,
-      `Files must be ${MAX_UPLOAD_LABEL} or smaller.`,
-    ),
-  folder: z.enum(ASSET_FOLDERS, { message: "Choose where this file belongs." }),
+  // The picker posts one `files` entry per selected file. parseForm collapses
+  // repeats into an array, but a single selection arrives as a bare File and
+  // no selection omits the key entirely — normalise all three shapes to an
+  // array, the same as assetIds/categoryIds elsewhere in this codebase.
+  files: z.preprocess(
+    toArray,
+    z
+      .array(uploadFileSchema)
+      .min(1, "Choose at least one file to upload.")
+      .max(MAX_BATCH_UPLOAD_FILES, `Upload at most ${MAX_BATCH_UPLOAD_FILES} files at once.`),
+  ),
+  folder: z.enum(ASSET_FOLDERS, { message: "Choose where these files belong." }),
+  // Applied to every file in the batch — fine for a single file, or several
+  // that genuinely share a caption; anything more specific is edited per-file
+  // afterward (components/admin/assets/asset-grid.tsx already supports that).
   altText: emptyToUndefined(
     z.string().trim().max(300, "Alt text must be 300 characters or fewer"),
   ),
-  // Measured in the browser purely so the admin list can show dimensions.
-  // Advisory display metadata — never used for a security or sizing decision.
-  width: emptyToUndefined(integerSchema({ min: 1, max: 100000 })),
-  height: emptyToUndefined(integerSchema({ min: 1, max: 100000 })),
+  /**
+   * Measured client-side, purely so the admin list can show pixel
+   * dimensions — advisory display metadata, never used for a security or
+   * sizing decision. Index-aligned with `files`: the form renders exactly one
+   * entry per file (empty string when a dimension wasn't measured, e.g. a
+   * video), so position — not any id — is what ties a width/height back to
+   * its file. `uploadAssetsAction` zips them back together by index.
+   */
+  widths: z.preprocess(toArray, z.array(emptyToUndefined(integerSchema({ min: 1, max: 100000 })))),
+  heights: z.preprocess(toArray, z.array(emptyToUndefined(integerSchema({ min: 1, max: 100000 })))),
 });
 
 export type AssetUploadInput = z.infer<typeof assetUploadSchema>;
